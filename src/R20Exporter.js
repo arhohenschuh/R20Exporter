@@ -150,7 +150,6 @@ class R20Exporter {
     _addZipFolder(zipFs, filename) {
         return zipFs.addDirectory(filename)
     }
-
     _addFileToZip(zipFs, filename, content) {
         try {
             zipFs.addBlob(filename, content)
@@ -164,123 +163,107 @@ class R20Exporter {
         }
     }
 
-    _exportZip(zipFs, fileEntry, onend, onprogress, onerror) {
-        zip.useWebWorkers = false
-        this._current_size = 0
-
-        const addEntryToZipWriter = (writer, zipFs) => {
-            setTimeout(() => addEntryToZipWriterDelayed(writer, zipFs), 0)
-        }
-
-        const addEntryToZipWriterDelayed = (writer, zipFs) => {
-            const makeCB = (c) => {
-                return () => {
-                    this._current_size += c.data ? c.data.size : 0
-                    onprogress(this._current_size, this._total_size)
-                    addEntryToZipWriter(writer, zipFs)
-                }
-            }
-            const partialprogress = (bytes) => onprogress(this._current_size + bytes, this._total_size)
-
-            // Find the current folder/item we need to add
-            let current = zipFs
-            for (let idx of this._zip_add_indices) {
-                current = current.children[idx]
-            }
-
-            // We're out of children, go back to the parent
-            if (current === undefined) {
-                this._zip_add_indices.pop()
-                // If the list is empty, we've gone back to the root and we're done
-                if (this._zip_add_indices.length == 0) {
-                    writer.close(onend)
-                } else {
-                    // Now that we're done with this folder, go to the next child of the parent
-                    this._zip_add_indices[this._zip_add_indices.length-1] += 1
-                    addEntryToZipWriterDelayed(writer, zipFs)
-                }
-                return
-            }
-
-            if (current.directory) {
-                // Add the directory and when we're done, start adding its children from index 0
-                this._zip_add_indices.push(0)
-                writer.add(current.getFullname(), null, makeCB(current),
-                    partialprogress, { directory: current.directory, lastModDate: R20_ZIP_EPOCH })
-            } else {
-                // Add the file and when we're done, add the next child of the parent
-                this._zip_add_indices[this._zip_add_indices.length-1] += 1
-                writer.add(current.getFullname(), new current.Reader(current.data, onerror), makeCB(current),
-                    partialprogress, { lastModDate: R20_ZIP_EPOCH })
-            }
-        }
-
-        const zipWriterCreated = (writer) => {
-            // Need to keep list of where we are in the add process, it seems
-            // that we can't add two files at the same time, they conflict and we
-            // can't add them recursively like zip.fs.FS.exportZip does because we'll
-            // run out of stack quickly due to the number of files.
-            this._zip_add_indices = [0]
-            addEntryToZipWriter(writer, zipFs)
-        }
-
-        zip.createWriter(new zip.FileWriter(fileEntry, "application/zip"), zipWriterCreated, onerror)
+    _exportZip(zipFs, writable, onprogress) {
+        zip.configure({
+            useWebWorkers: true,
+            // Workers also escape background-tab throttling, which is what made
+            // an unattended export take hours.
+            maxWorkers: (navigator.hardwareConcurrency || 4),
+        })
+        return zipFs.exportWritable(writable, {
+            bufferedWrite: false,
+            keepOrder: true,
+            lastModDate: R20_ZIP_EPOCH,
+            onprogress: (current, total) => onprogress(current, total || this._total_size),
+        })
     }
 
-    // Based on https://gildas-lormeau.github.io/zip.js/demos/demo1.js
-    _saveZipToFile(zipFs, filename) {
-        const BYTES = ["Bytes", "KB", "MB", "GB"]
-        const DIV = [1, 1024, 1024 * 1024, 1024 * 1024 * 1024]
-        let size = this._total_size
+    _formatSize(bytes) {
+        const BYTES = ["Bytes", "KB", "MB", "GB", "TB"]
+        let size = bytes
         let div = 0
-        while ((size / 1024) > 1 && div + 1 < DIV.length) {
+        while ((size / 1024) > 1 && div + 1 < BYTES.length) {
             size /= 1024
             div += 1
         }
+        return size.toFixed(2) + " " + BYTES[div]
+    }
+
+    // Must be called from the click that starts the export: the picker needs a
+    // user gesture, and by the time a multi-gigabyte zip is ready the gesture is
+    // long gone. A cancelled picker is not an error, it falls back to a download.
+    async acquireSaveHandle(filename) {
+        if (typeof window.showSaveFilePicker !== "function")
+            return null
+        try {
+            return await window.showSaveFilePicker({
+                suggestedName: filename,
+                types: [{ description: "ZIP archive", accept: { "application/zip": [".zip"] } }],
+            })
+        } catch (err) {
+            return null
+        }
+    }
+
+    async _openZipDestination(filename) {
+        if (this._save_handle) {
+            return {
+                writable: await this._save_handle.createWritable(),
+                deliver: () => undefined,
+            }
+        }
+        // OPFS replaces webkitRequestFileSystem(TEMPORARY, 4 GB), which is
+        // deprecated and whose quota is what produced QuotaExceededError (GH #23).
+        if (navigator.storage && navigator.storage.getDirectory) {
+            const root = await navigator.storage.getDirectory()
+            const handle = await root.getFileHandle("R20Exporter-tmp.zip", { create: true })
+            return {
+                writable: await handle.createWritable(),
+                deliver: async () => {
+                    saveAs(await handle.getFile(), filename)
+                    // Best effort: the browser may still be reading the file.
+                    setTimeout(() => root.removeEntry("R20Exporter-tmp.zip").catch(() => undefined), 60000)
+                },
+            }
+        }
+        const chunks = []
+        return {
+            writable: new WritableStream({ write: (chunk) => { chunks.push(chunk) } }),
+            deliver: () => saveAs(new Blob(chunks, { type: "application/zip" }), filename),
+        }
+    }
+
+    async _saveZipToFile(zipFs, filename) {
         this.console.warn("Done downloading resources!")
-        this.console.warn("It is highly recommended to keep this tab focused and the window non-minimized during the entire process\n" +
-                     "otherwise it could take hours instead of minutes to generate the ZIP file for your campaign.\n" +
-                     "You can separate the tab into its own window if you want to keep using your browser in the meantime.")
-        this.console.log("Generating ZIP file with ", size.toFixed(2), BYTES[div] + " of data")
-        this.console.setLabel1("Generating " + size.toFixed(2) + BYTES[div] + " ZIP file (" + this.TOTAL_STEPS + "/" + this.TOTAL_STEPS + ")")
+        this.console.log("Generating ZIP file with ", this._formatSize(this._total_size), " of data")
+        this.console.setLabel1("Generating " + this._formatSize(this._total_size) + " ZIP file (" +
+            this.TOTAL_STEPS + "/" + this.TOTAL_STEPS + ")")
         this.console.setProgress1(this.TOTAL_STEPS - 1, this.TOTAL_STEPS)
 
-        const requestFileSystem = window.webkitRequestFileSystem || window.mozRequestFileSystem || window.requestFileSystem
-
-        const createTempFile = (tempCB) => {
-            let tmpFilename = "tmp.zip"
-            requestFileSystem(window.TEMPORARY, 4 * 1024 * 1024 * 1024,
-                (filesystem) => {
-                    const create = () => filesystem.root.getFile(tmpFilename, { create: true }, (zipFile) => tempCB(zipFile))
-                    // Get the tmp.zip if it exists then delete it and create new
-                    filesystem.root.getFile(tmpFilename, null,
-                        (entry) => entry.remove(create, create), create)
-                }
-            )
-        }
-
-        // Create a tmp.zip file in temporary storage
-        createTempFile((fileEntry) => {
-            this._exportZip(zipFs, fileEntry, () => {
-                    this.console.warn("Congratulations! The Campaign.zip file was generated successfully.\nStarting download.")
-                    this.console.setProgress1(this.TOTAL_STEPS, this.TOTAL_STEPS)
-                    this._reportFailuresToUser()
-                    $("#r20exporter-log").show();
-                    fileEntry.file((f) => saveAs(f, filename))
-                }, (current, total) => {
-                    const percent = 100 * current / total
-                    this.console.setProgress2(current, total)
-                    this.console.setLabel2("Generating ZIP file (" + percent.toFixed(2) + "%)")
-                }, (event) => {
-                    let message = event;
-                    if (event && event.target && event.target.error)
-                        message = event.target.error;
-                    this.console.error("Error creating zip file writer : ", message)
-                    if (message.includes("QuotaExceededError")) {
-                        this.console.error("This error likely means you have run out of disk space, or you need to clear your browser's cache folder, or give app.roll20.net permission to write to local storage. If all else fails, exporting the campaign to JSON would work as an alternative.");
-                    }
-                })
+        try {
+            const destination = await this._openZipDestination(filename)
+            await this._exportZip(zipFs, destination.writable, (current, total) => {
+                this.console.setProgress2(current, total)
+                this.console.setLabel2("Generating ZIP file (" + (100 * current / (total || 1)).toFixed(2) + "%)")
             })
+            await destination.deliver()
+            this.console.warn("Congratulations! The Campaign.zip file was generated successfully.")
+            this.console.setProgress1(this.TOTAL_STEPS, this.TOTAL_STEPS)
+            this._reportFailuresToUser()
+            $("#r20exporter-log").show();
+        } catch (err) {
+            const message = (err && err.message) ? err.message : String(err)
+            this.console.error("Error writing the zip file: ", message)
+            if (message.includes("Quota")) {
+                this.console.error("You have run out of disk space for this browser profile. Free some space, or " +
+                    "choose a save location when the export starts so the zip is written straight to disk.")
+            }
+            $("#r20exporter-log").show();
+        } finally {
+            try {
+                zip.terminateWorkers()
+            } catch (err) { }
+        }
     }
 
     // A miss the user never sees is the defect this whole report exists to fix,
@@ -1420,12 +1403,13 @@ class R20Exporter {
     }
 
 
-    exportCampaignZip(filename = null) {
+    async exportCampaignZip(filename = null) {
         this.clearConsole("Exporting Campaign to ZIP file")
         this.TOTAL_STEPS = 11;
         this.console.show()
         if (!this.checkEngine())
             return
+        this._save_handle = await this.acquireSaveHandle(filename || (this.title + ".zip"))
         this.parseCampaign((campaign) => this.saveCampaignZip(filename))
     }
 

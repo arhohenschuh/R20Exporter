@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { runZipExport, createExporter, zipContents, waitFor } = require("./harness/roll20.js");
+const { runZipExport, createExporter, waitFor } = require("./harness/roll20.js");
 const { buildCampaign, buildRoutes, DEAD_ASSET } = require("./fixtures/campaign.js");
 const { diffExports } = require("../tools/diff-exports.js");
 
@@ -16,9 +16,8 @@ function exportOptions(overrides = {}) {
 
 async function exportOnce(overrides) {
     const page = await runZipExport(exportOptions(overrides));
-    const contents = zipContents(page.recorder);
     page.stop();
-    return { page, contents };
+    return { page, contents: page.contents };
 }
 
 test("an export carries the three sidecars next to campaign.json", async () => {
@@ -101,8 +100,8 @@ test("the index resolves ids the converter would otherwise have to guess", async
 });
 
 test("zip entries carry a pinned timestamp", async () => {
-    const { page } = await exportOnce();
-    const dates = new Set(page.recorder.entries.map((e) => (e.lastModDate ? e.lastModDate.toISOString() : "unset")));
+    const { contents } = await exportOnce();
+    const dates = new Set(Object.values(contents.__dates).map((d) => (d ? d.toISOString() : "unset")));
     assert.deepEqual([...dates], ["1980-01-01T00:00:00.000Z"]);
 });
 
@@ -122,10 +121,10 @@ test("the export refuses to start on a page it does not understand", async () =>
     const { Campaign, Jukebox } = buildCampaign();
     const page = createExporter(exportOptions({ campaign: Campaign, jukebox: Jukebox }));
     page.sandbox.BackboneFirebase = undefined;
-    page.exporter.exportCampaignZip();
+    await page.exporter.exportCampaignZip();
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(page.recorder.saved.length, 0, "nothing may be written when the guard fails");
-    assert.equal(page.recorder.entries.length, 0);
+    assert.equal(page.exporter.zip, null);
     page.stop();
 });
 

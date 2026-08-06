@@ -11,6 +11,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const SRC = path.join(__dirname, "..", "..", "src");
+const LIBS = path.join(__dirname, "..", "..", "libs");
 
 // --- jQuery, reduced to what the exporter actually calls ---------------------
 
@@ -58,113 +59,21 @@ function makeJQuery(options) {
     return $;
 }
 
-// --- zip.js, reduced to the zip.fs subset the exporter uses ------------------
-
-class FakeZipEntry {
-    constructor(name, parent, directory) {
-        this.name = name;
-        this.parent = parent;
-        this.directory = !!directory;
-        this.children = directory ? [] : undefined;
-        this.data = null;
-        this.Reader = FakeReader;
-    }
-
-    getFullname() {
-        const parts = [];
-        let current = this;
-        while (current && current.parent) {
-            parts.unshift(current.name);
-            current = current.parent;
-        }
-        return parts.join("/");
-    }
-
-    addDirectory(name) {
-        const entry = new FakeZipEntry(name, this, true);
-        this.children.push(entry);
-        return entry;
-    }
-
-    addBlob(name, blob) {
-        const entry = new FakeZipEntry(name, this, false);
-        entry.data = blob;
-        this.children.push(entry);
-        return entry;
-    }
-}
-
-class FakeReader {
-    constructor(data) {
-        this.data = data;
-    }
-}
-
-function makeZip(recorder) {
-    return {
-        useWebWorkers: false,
-        fs: {
-            FS: class {
-                constructor() {
-                    this.root = new FakeZipEntry("", null, true);
-                }
-            },
-        },
-        FileWriter: class {
-            constructor(fileEntry) {
-                this.fileEntry = fileEntry;
-            }
-        },
-        createWriter(writer, onCreated) {
-            onCreated({
-                add(name, reader, onend, onprogress, options) {
-                    recorder.entries.push({
-                        name: name,
-                        directory: !!(options && options.directory),
-                        lastModDate: options ? options.lastModDate : undefined,
-                        data: reader ? reader.data : null,
-                    });
-                    onend({ data: reader ? reader.data : null });
-                },
-                close(onend) {
-                    recorder.closed = true;
-                    onend();
-                },
-            });
-        },
-    };
-}
-
 // --- the page ---------------------------------------------------------------
-
-class FakeBlob {
-    constructor(parts, options = {}) {
-        this._text = parts.map((p) => (typeof p === "string" ? p : String(p))).join("");
-        this.size = Buffer.byteLength(this._text);
-        this.type = options.type || "";
-    }
-    text() {
-        return Promise.resolve(this._text);
-    }
-    arrayBuffer() {
-        const buffer = Buffer.from(this._text);
-        return Promise.resolve(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
-    }
-}
 
 function makeFetch(routes, log) {
     return (url) => {
         log.push(url);
         const route = typeof routes === "function" ? routes(url) : routes[url];
         if (route === undefined) {
-            return Promise.resolve({ status: 404, statusText: "Not Found", blob: () => Promise.resolve(new FakeBlob([""])) });
+            return Promise.resolve({ status: 404, statusText: "Not Found", blob: () => Promise.resolve(new Blob([""])) });
         }
         if (route instanceof Error) return Promise.reject(route);
         const status = route.status === undefined ? 200 : route.status;
         return Promise.resolve({
             status: status,
             statusText: route.statusText || (status === 200 ? "OK" : "Error"),
-            blob: () => Promise.resolve(route.blob || new FakeBlob([route.body || "data"], { type: route.type || "image/png" })),
+            blob: () => Promise.resolve(route.blob || new Blob([route.body || "data"], { type: route.type || "image/png" })),
             json: () => Promise.resolve(route.json || {}),
         });
     };
@@ -202,12 +111,33 @@ function createPage(options = {}) {
         RegExp,
         Buffer,
         Uint8Array,
+        Uint16Array,
+        Uint32Array,
+        Int32Array,
+        Float64Array,
+        DataView,
+        ArrayBuffer,
+        SharedArrayBuffer: globalThis.SharedArrayBuffer,
+        WebAssembly,
+        TextEncoder,
+        TextDecoder,
+        ReadableStream,
+        WritableStream,
+        TransformStream,
+        CompressionStream: globalThis.CompressionStream,
+        DecompressionStream: globalThis.DecompressionStream,
+        URL,
+        Response: globalThis.Response,
+        queueMicrotask,
+        structuredClone,
+        navigator: options.navigator || { hardwareConcurrency: 4 },
         crypto: globalThis.crypto,
         AbortController,
         atob: (s) => Buffer.from(s, "base64").toString("binary"),
         btoa: (s) => Buffer.from(s, "binary").toString("base64"),
         unescape: global.unescape,
-        Blob: FakeBlob,
+        Blob,
+        File,
         FileReader: class {
             readAsText(blob) {
                 blob.text().then((text) => {
@@ -257,18 +187,16 @@ function createPage(options = {}) {
     sandbox.globalThis = sandbox;
     sandbox.self = sandbox;
     sandbox.$ = makeJQuery({ title: options.title || "Test Campaign" });
-    sandbox.zip = makeZip(recorder);
     sandbox.fetch = makeFetch(options.routes || {}, recorder.fetched);
     sandbox.window.addEventListener = () => {};
-    sandbox.webkitRequestFileSystem = (type, size, cb) => {
-        const fileEntry = {
-            remove: (ok) => ok(),
-            file: (cb2) => cb2({ name: "tmp.zip", size: 0 }),
-        };
-        cb({ root: { getFile: (name, opts, ok) => ok(fileEntry) } });
-    };
+    if (options.showSaveFilePicker) sandbox.showSaveFilePicker = options.showSaveFilePicker;
 
     const context = vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(path.join(LIBS, "zipjs", "zip-fs.js"), "utf8"), context, { filename: "zip-fs.js" });
+    // No Worker in Node: keep zip.js on the main thread whatever the exporter asks for.
+    sandbox.zip.configure({ useWebWorkers: false });
+    const configure = sandbox.zip.configure;
+    sandbox.zip.configure = (settings) => configure(Object.assign({}, settings, { useWebWorkers: false }));
     for (const file of ["R20ExportManifests.js", "R20Exporter.js"]) {
         vm.runInContext(fs.readFileSync(path.join(SRC, file), "utf8"), context, { filename: file });
     }
@@ -314,18 +242,32 @@ function waitFor(predicate, { timeout = 15000, label = "condition" } = {}) {
 
 async function runZipExport(options = {}) {
     const page = createExporter(options);
-    page.exporter.exportCampaignZip();
+    await page.exporter.exportCampaignZip();
     await waitFor(() => page.recorder.saved.length > 0, { label: "the zip to be saved" });
+    page.contents = await readZip(page.sandbox, page.recorder.saved[0].file);
     return page;
 }
 
-function zipContents(recorder) {
+// Read the produced archive back with the same library, so a test asserts on a
+// real zip rather than on the calls the exporter happened to make.
+async function readZip(sandbox, blob) {
+    const zipFs = new sandbox.zip.fs.FS();
+    await zipFs.importBlob(blob);
     const contents = {};
-    for (const entry of recorder.entries) {
-        if (entry.directory) continue;
-        contents[entry.name] = entry.data ? entry.data._text : "";
-    }
+    const dates = {};
+    const walk = async (entry) => {
+        for (const child of entry.children) {
+            if (child.directory) {
+                await walk(child);
+            } else {
+                contents[child.getFullname()] = await child.getText();
+                dates[child.getFullname()] = child.data ? child.data.lastModDate : undefined;
+            }
+        }
+    };
+    await walk(zipFs.root);
+    Object.defineProperty(contents, "__dates", { value: dates, enumerable: false });
     return contents;
 }
 
-module.exports = { createPage, createExporter, runZipExport, waitFor, zipContents, FakeBlob };
+module.exports = { createPage, createExporter, runZipExport, waitFor, readZip };

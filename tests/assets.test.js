@@ -4,8 +4,15 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { hostCandidates, assetCandidates, resolutionOf } = require("../src/R20ExportManifests.js");
-const { runZipExport, zipContents } = require("./harness/roll20.js");
+const { runZipExport } = require("./harness/roll20.js");
 const { buildCampaign, buildRoutes, LEGACY_ONLY_ASSET, LEGACY_HOST, DEAD_ASSET } = require("./fixtures/campaign.js");
+
+async function exportFixture() {
+    const { Campaign, Jukebox } = buildCampaign();
+    const page = await runZipExport({ campaign: Campaign, jukebox: Jukebox, routes: buildRoutes(), title: "Sunless Citadel" });
+    page.stop();
+    return page.contents;
+}
 
 test("a Roll20 asset is spelled for every known CDN host, renamed host first", () => {
     assert.deepEqual(hostCandidates("https://files.d20.io/images/1/med.png"), [
@@ -39,11 +46,7 @@ test("a url with no resolution variant is still tried on every host, once each",
 });
 
 test("an asset that only answers on the legacy host is recovered, not lost", async () => {
-    const { Campaign, Jukebox } = buildCampaign();
-    const page = await runZipExport({ campaign: Campaign, jukebox: Jukebox, routes: buildRoutes(), title: "Sunless Citadel" });
-    const contents = zipContents(page.recorder);
-    page.stop();
-
+    const contents = await exportFixture();
     const report = JSON.parse(contents["export_report.json"]);
     const recovered = report.assets.find((a) => a.url === LEGACY_ONLY_ASSET);
     assert.ok(recovered, "the legacy-host asset must be in the report");
@@ -55,11 +58,7 @@ test("an asset that only answers on the legacy host is recovered, not lost", asy
 });
 
 test("provenance is recorded for every stored asset", async () => {
-    const { Campaign, Jukebox } = buildCampaign();
-    const page = await runZipExport({ campaign: Campaign, jukebox: Jukebox, routes: buildRoutes(), title: "Sunless Citadel" });
-    const contents = zipContents(page.recorder);
-    page.stop();
-
+    const contents = await exportFixture();
     const report = JSON.parse(contents["export_report.json"]);
     const stored = report.assets.filter((a) => a.outcome === "bundled" || a.outcome === "bundled-lower-res");
     assert.ok(stored.length >= 5);
@@ -72,11 +71,7 @@ test("provenance is recorded for every stored asset", async () => {
 });
 
 test("a dead asset records every candidate it tried before giving up", async () => {
-    const { Campaign, Jukebox } = buildCampaign();
-    const page = await runZipExport({ campaign: Campaign, jukebox: Jukebox, routes: buildRoutes(), title: "Sunless Citadel" });
-    const contents = zipContents(page.recorder);
-    page.stop();
-
+    const contents = await exportFixture();
     const report = JSON.parse(contents["export_report.json"]);
     const dead = report.assets.find((a) => a.url === DEAD_ASSET);
     assert.equal(dead.outcome, "failed");

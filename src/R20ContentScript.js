@@ -13,16 +13,10 @@ function loadScript(url, cb) {
 }
 
 loadScript(chrome.runtime.getURL("libs/FileSaver/FileSaver.js"),
- () => loadScript(chrome.runtime.getURL("libs/zipjs/zip.js"), 
-  () => loadScript(chrome.runtime.getURL("libs/zipjs/zip-fs.js"), 
-    () => loadScript(chrome.runtime.getURL("libs/zipjs/zip-ext.js"),
-      () => loadScript(chrome.runtime.getURL("libs/zipjs/deflate.js"),
-        () => loadScript(chrome.runtime.getURL("src/R20ExportManifests.js"),
-          () => loadScript(chrome.runtime.getURL("src/R20Exporter.js"))
-          )
-        )
-      )
-    )
+ () => loadScript(chrome.runtime.getURL("libs/zipjs/zip-fs.js"),
+  () => loadScript(chrome.runtime.getURL("src/R20ExportManifests.js"),
+   () => loadScript(chrome.runtime.getURL("src/R20Exporter.js"))
+   )
   )
 );
 

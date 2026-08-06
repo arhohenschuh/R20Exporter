@@ -9,15 +9,17 @@ This extension allows you to export a Roll 20 campaign and all of its assets int
 
 # R20Exporter
 
-This extension is only available for Chrome, as it uses the local storage API to store the ZIP file, which can have many GBs of data in it. Firefox unfortunately does not support that API, so it cannot work for it.
+This extension targets **Chrome and Edge**. It uses the File System Access API to write the ZIP straight to a file you choose, which is what makes multi-gigabyte campaigns possible.
 
 **To install,** please visit the [Chrome Webstore](https://chrome.google.com/webstore/detail/r20exporter/apbhfinbjilbkljgcnjjagecnciphnoi)
 
 To export your campaign go to the settings tab in the Roll20 page (the gear icon on the far right of the sidebar), click to expand the "R20Exporter" section, and you should see a button "**Export Campaign to ZIP**". Simply click on it, then wait until the ZIP file is generated and downloaded.
 
-While generating the ZIP file, do make sure you have the campaign tab focused in chrome (separate it in its own window if needed), otherwise the download speed of the zip will drop to very very slow transfer speeds since the javascript that generates the zip on the fly will be running as a low priority background process.
+Your browser asks where to save the archive **when the export starts**, not when it finishes: choosing a location up front lets the ZIP be streamed to disk instead of being held in memory. If you cancel that dialog the export still works and the file is downloaded normally at the end.
 
-The dialog that opens will show you the various steps the script is undertaking and you can click the Log button to see a more detailed log of what is happening. That dialog window will also prevent you from messing around with the campaign. It is best to let the script do its thing unhindered and to not open another campaign in another window. Once the export process is complete, that window will close on its own and the ZIP file will be downloaded automatically.
+The ZIP is compressed in background workers, so you can leave the tab in the background or minimize the window and the export will keep running at full speed.
+
+The dialog that opens will show you the various steps the script is undertaking and you can click the Log button to see a more detailed log of what is happening. That dialog window will also prevent you from messing around with the campaign. It is best to let the script do its thing unhindered and to not open another campaign in another window. Once the export process is complete, that window will close on its own and the ZIP file will be downloaded automatically — **unless something was missing**, in which case the dialog stays open and tells you what.
 
 To report any issues, please go to the GitHub [issue tracker](https://github.com/kakaroto/R20Exporter/issues).
 

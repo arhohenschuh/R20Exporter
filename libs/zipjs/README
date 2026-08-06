@@ -1,4 +1,10 @@
-zip.js is an open-source library (BSD license) for zipping and unzipping files.
+zip.js by Gildas Lormeau -- https://github.com/gildas-lormeau/zip.js
 
-See here for more info:
-http://gildas-lormeau.github.com/zip.js/
+Vendored build: dist/zip-fs.js from @zip.js/zip.js 2.8.34 (UMD, exposes the
+global `zip`). Includes ZipWriter/ZipReader, the virtual file system used by
+src/R20Exporter.js, embedded web-worker code and the WASM deflate module.
+
+Licensed BSD-3-Clause, see LICENSE.
+
+Replaced the 2013 zip.js (zip.js + zip-ext.js + zip-fs.js + deflate.js) in
+R20Exporter 0.14.0: Zip64 support, streamed writes and worker compression.

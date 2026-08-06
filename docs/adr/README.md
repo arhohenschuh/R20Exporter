@@ -13,6 +13,7 @@ Code that exists because of a decision here carries a short comment naming it.
 | [ADR-001](ADR-001-sidecar-manifests.md) | Sidecar manifests, never a transformed record | Accepted |
 | [ADR-002](ADR-002-testing-in-a-synthetic-page.md) | Test the shipped code in a synthetic Roll20 page | Accepted |
 | [ADR-003](ADR-003-asset-candidate-ladder.md) | One candidate ladder owns host and resolution selection | Accepted |
+| [ADR-004](ADR-004-opfs-and-modern-zip.md) | Write the zip through OPFS and a save handle acquired up front | Accepted |
 
 The release plan these decisions serve is [ROADMAP.md](ROADMAP.md); defects are
 recorded in [../bugs](../bugs).

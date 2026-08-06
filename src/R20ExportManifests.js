@@ -20,7 +20,7 @@
 
 // Kept in step with manifest.json by tests/version.test.js. The page context
 // has no access to chrome.runtime, so the version cannot be read at runtime.
-const R20EXPORTER_VERSION = "0.13.0";
+const R20EXPORTER_VERSION = "0.14.0";
 
 const REPORT_FORMAT = "1.1";
 const INTEGRITY_FORMAT = "1.0";
