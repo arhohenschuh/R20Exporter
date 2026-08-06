@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "Fields that move on their own between two exports of an unchanged campaign.",
+    "Roll20 writes them server-side, so a byte-for-byte comparison of two exports",
+    "is only meaningful once they are masked. Measured on a real campaign, not",
+    "guessed; add to this list only with evidence from a diff.",
+    "Syntax: dot-separated paths, '[*]' matches every element of an array."
+  ],
+  "files": {
+    "campaign.json": [
+      "lastmodified",
+      "legacySignallingUsedAt",
+      "webrtcOnlinePlayers",
+      "lastFogConversionInitiated",
+      "instance_id",
+      "turnorder",
+      "playerpageid",
+      "videopos",
+      "pages[*].force_lighting_refresh",
+      "pages[*].jumpgate_hex_updated",
+      "pages[*].lastupdated",
+      "players[*].online",
+      "players[*].lastActive"
+    ],
+    "export_report.json": [
+      "generated_at"
+    ],
+    "integrity.json": [
+      "generated_at"
+    ],
+    "index.json": [
+      "generated_at"
+    ]
+  }
+}

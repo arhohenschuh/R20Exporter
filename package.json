@@ -1,0 +1,8 @@
+{
+  "name": "r20exporter",
+  "private": true,
+  "description": "Development tooling for the R20Exporter browser extension. The extension itself has no runtime dependencies.",
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}

@@ -1,5 +1,9 @@
 
 
+// Pinned so two exports of an unchanged campaign produce the same bytes; the
+// DOS date field in a zip cannot represent anything before 1980.
+const R20_ZIP_EPOCH = new Date(Date.UTC(1980, 0, 1, 0, 0, 0))
+
 class R20Exporter {
     constructor(title) {
         this.title = title
@@ -7,11 +11,41 @@ class R20Exporter {
         this.zip = null
         this._pending_operations = new Set()
         this._total_size = 0
+        this.report = new R20ExportReport()
+        this._live_counts = null
         this.console = new R20ExporterModalWindow("Exporting Campaign to ZIP file", "r20exporter-modal")
         this.clearConsole();
-        this.TOTAL_STEPS = 10;
+        this.TOTAL_STEPS = 11;
         this._DEBUG_OPS = false;
         this.constructor.singleton = this;
+    }
+
+    // The page internals we read are an unversioned private API. Refusing to
+    // start beats writing half a zip out of a Roll20 we no longer understand.
+    checkEngine() {
+        const guard = checkEngineGlobals(window)
+        for (const degraded of guard.degraded) {
+            this.console.warn("Roll20 does not expose <em>" + degraded.path + "</em>: " + degraded.why +
+                " will be missing from this export.")
+            this.report.note("degraded: " + degraded.path + " unavailable (" + degraded.why + ")")
+        }
+        if (!guard.ok) {
+            const names = guard.missing.map((m) => m.path + " (" + m.why + ")").join(", ")
+            this.console.error("<strong>This version of R20Exporter does not understand this Roll20 page.</strong>")
+            this.console.error("Missing or changed page internals: " + names)
+            this.console.error("Nothing was exported. Please report this at " +
+                "<a href='https://github.com/kakaroto/R20Exporter/issues' target='_blank'>the issue tracker</a>.")
+        }
+        return guard.ok
+    }
+
+    _zipPath(folder, filename) {
+        try {
+            const base = folder.getFullname ? folder.getFullname() : ""
+            return base ? base + "/" + filename : filename
+        } catch (err) {
+            return filename
+        }
     }
 
     clearConsole(title) {
@@ -172,12 +206,12 @@ class R20Exporter {
                 // Add the directory and when we're done, start adding its children from index 0
                 this._zip_add_indices.push(0)
                 writer.add(current.getFullname(), null, makeCB(current),
-                    partialprogress, { directory: current.directory })
+                    partialprogress, { directory: current.directory, lastModDate: R20_ZIP_EPOCH })
             } else {
                 // Add the file and when we're done, add the next child of the parent
                 this._zip_add_indices[this._zip_add_indices.length-1] += 1
                 writer.add(current.getFullname(), new current.Reader(current.data, onerror), makeCB(current),
-                    partialprogress, { })
+                    partialprogress, { lastModDate: R20_ZIP_EPOCH })
             }
         }
 
@@ -230,7 +264,7 @@ class R20Exporter {
             this._exportZip(zipFs, fileEntry, () => {
                     this.console.warn("Congratulations! The Campaign.zip file was generated successfully.\nStarting download.")
                     this.console.setProgress1(this.TOTAL_STEPS, this.TOTAL_STEPS)
-                    setTimeout(() => this.console.hide(), 10000);
+                    this._reportFailuresToUser()
                     $("#r20exporter-log").show();
                     fileEntry.file((f) => saveAs(f, filename))
                 }, (current, total) => {
@@ -247,6 +281,29 @@ class R20Exporter {
                     }
                 })
             })
+    }
+
+    // A miss the user never sees is the defect this whole report exists to fix,
+    // so a non-zero count keeps the dialog open instead of auto-closing.
+    _reportFailuresToUser() {
+        const failures = this.report.failures
+        const mismatches = this.report.collectionMismatches
+        if (failures.length === 0 && mismatches.length === 0) {
+            setTimeout(() => this.console.hide(), 10000);
+            return
+        }
+        if (failures.length > 0) {
+            this.console.error("<strong>" + failures.length + " asset(s) are missing from this export.</strong> " +
+                "Every one of them is listed with its reason in <em>export_report.json</em> inside the ZIP.")
+            for (const asset of failures.slice(0, 10))
+                this.console.log("Missing asset: ", asset.path, " <- ", asset.url, " (", asset.reason || asset.outcome, ")")
+            if (failures.length > 10)
+                this.console.log("... and ", failures.length - 10, " more, see export_report.json")
+        }
+        for (const mismatch of mismatches) {
+            this.console.error("Exported " + mismatch.exported + " " + mismatch.collection +
+                " but the campaign has " + mismatch.live + ".")
+        }
     }
     _parseSides(sides) {
         let result = []
@@ -575,20 +632,24 @@ class R20Exporter {
         this.console.setLabel1("Extracting Campaign data (2/" + this.TOTAL_STEPS + ")")
         this.console.setProgress1(1, this.TOTAL_STEPS)
         result.handouts = this.parseHandouts(Campaign.handouts, done)
-        result.pdfs = this.parsePDFs(Campaign.pdfs, done)
+        result.pdfs = Campaign.pdfs ? this.parsePDFs(Campaign.pdfs, done) : []
         result.characters = this.parseCharacters(Campaign.characters, done)
         result.pages = this.parsePages(Campaign.pages)
         result.players = this.parsePlayers(Campaign.players)
         result.macros = this.parseMacros(Campaign.players)
-        result.decks = this.parseDecks(Campaign.decks)
-        result.tables = this.parseTables(Campaign.rollabletables)
-        result.jukebox = Jukebox.playlist.toJSON()
+        result.decks = Campaign.decks ? this.parseDecks(Campaign.decks) : []
+        result.tables = Campaign.rollabletables ? this.parseTables(Campaign.rollabletables) : []
+        result.jukebox = (typeof Jukebox !== "undefined" && Jukebox.playlist) ? Jukebox.playlist.toJSON() : []
         result.jukeboxfolder = result.jukeboxfolder != "" ? JSON.parse(result.jukeboxfolder) : []
         result.journalfolder = result.journalfolder != "" ? JSON.parse(result.journalfolder) : []
         result.turnorder = result.turnorder != "" ? JSON.parse(result.turnorder) : []
         this._addOrphanedElementsToFolder(result.jukeboxfolder, result.jukebox)
         this._addOrphanedElementsToFolder(result.journalfolder, result.handouts)
         this._addOrphanedElementsToFolder(result.journalfolder, result.pdfs)
+        // Counted from the live page, not from what we produced: a collection we
+        // never enumerated would otherwise report a happy 0.
+        this._live_counts = liveCollectionCounts(window)
+        this.report.setCampaign(result)
         this._fetchChatArchive(result, done)
         this.console.log("Download operations in progress : ", this.numPendingOperations)
         this.console.setProgress2(0, this.numPendingOperations)
@@ -612,10 +673,12 @@ class R20Exporter {
     }
 
     async parseCampaign(cb) {
+        // .all()/.count() are Roll20 page extensions to Array.prototype, not
+        // standard JS; depending on them is one more unversioned page API.
         const character_num_attributes = Campaign.characters.models.map((c) => c.attribs.length)
-        if (!character_num_attributes.all((n) => n > 0)) {
+        if (!character_num_attributes.every((n) => n > 0)) {
             this._waiting_empty_sheets = this._waiting_empty_sheets || {}
-            const num_loaded_sheets = character_num_attributes.count((n) => n > 0)
+            const num_loaded_sheets = character_num_attributes.filter((n) => n > 0).length
             this.console.log("Waiting for character sheets to finish loading (" + num_loaded_sheets + "/" + character_num_attributes.length + ")")
             this.console.setLabel1("Waiting for character sheets to finish loading (1/" + this.TOTAL_STEPS + ")")
             this.console.setLabel2(num_loaded_sheets + "/" + character_num_attributes.length + " character sheets loaded")
@@ -688,6 +751,8 @@ class R20Exporter {
         this.clearConsole("Exporting Campaign to JSON file")
         this.TOTAL_STEPS = 3;
         this.console.show()
+        if (!this.checkEngine())
+            return
         this.parseCampaign(() => this.saveCampaign(filename))
     }
 
@@ -778,12 +843,12 @@ class R20Exporter {
         
     }
 
-    downloadResource(url, cb, errorCB = null, retryId = undefined, expBackoff = 10) {
-        // Some older resources still use the s3.amazonaws.com URL which fails due to CORS but Roll20 changes 
-        // those URLs automatically to files.d20.io, so we do the same here
-        url = url.replace("https://s3.amazonaws.com/files.d20.io/", "https://files.d20.io/")
+    downloadResource(url, cb, errorCB = null, retryId = undefined, expBackoff = 10, record = null) {
+        // No host rewriting here: assetCandidates() owns host selection, and a
+        // rewrite at this level silently undid the legacy-host fallback.
         if (!url) {
-            errorCB();
+            if (errorCB)
+                errorCB({ reason: "empty url" });
             return;
         }
         const id = retryId || this.newPendingOperation("Downloading resource " + url)
@@ -799,70 +864,121 @@ class R20Exporter {
                 timeoutId = this.timeoutHangingFetch(controller, url);
                 return Promise.resolve(response.blob());
             } else if (response.status == 404 || response.status == 403) {
-                return Promise.reject(new Error("DO_NOT_RETRY"))
+                return Promise.reject(this._downloadError("DO_NOT_RETRY", response.status))
             } else {
-                return Promise.reject(new Error(response.statusText))
+                return Promise.reject(this._downloadError(response.statusText, response.status))
             }
         }
         ).then((blob) => {
             clearInterval(timeoutId);
+            this.report.attempted(record, url, 200)
             this.completedOperation(id)
             if (cb)
-                cb(blob)
+                cb(blob, url)
         }
         ).catch((error) => {
             clearInterval(timeoutId);
+            this.report.attempted(record, url, error.status || null, error.message)
             if (expBackoff < 30 && error.message != "DO_NOT_RETRY") {
                 //this.console.log("Exponential backoff for: ", expBackoff, url);
                 setTimeout(() => {
-                    this.downloadResource(url, cb, errorCB, id, expBackoff * (1.5 + Math.random()))
+                    this.downloadResource(url, cb, errorCB, id, expBackoff * (1.5 + Math.random()), record)
                 }, expBackoff * 1000)
             } else {
                 this.completedOperation(id)
                 if (errorCB)
-                    errorCB()
+                    errorCB({ reason: error.message, status: error.status || null, url: url })
             }
         }
         )
     }
 
+    _downloadError(message, status) {
+        const error = new Error(message)
+        error.status = status
+        return error
+    }
+
     // Most avatar/imgsrc URLs use the 'med' filename, even for the huge map files. We should download the appropriate sized
     // file depending on the image size we are looking for. We just download the highest resolution file that we can instead.
-    downloadR20Resource(folder, prefix, url, finallyCB, try_files = ["original", "max", "med", "thumb"], use_canvas = false) {
-        // Some older resources still use the s3.amazonaws.com URL which fails due to CORS but Roll20 changes 
-        // those URLs automatically to files.d20.io, so we do the same here
-        url = url.replace("https://s3.amazonaws.com/files.d20.io/", "https://files.d20.io/")
-        let filenameParts = url.split("/").slice(-1)[0].split("?")[0].split(".")
-        let filename = filenameParts[0];
-        let ext = filenameParts.length > 1 ? filenameParts[filenameParts.length - 1] : "png";
-        // This is needed so we download the higher res file first.
-        // Unfortunately, there are some CORS issues sometimes, so if higher res file fails, download the lower one.
-        if (try_files.length > 0) {
-            let new_url = url
-            if (["original", "max", "med", "thumb"].includes(filename)) {
-                new_url = url.replace("/" + filename + ".", "/" + try_files[0] + ".")
-            } else {
-                try_files = [""]
-            }
-
-            const successCB = this._makeAddBlobToZip(folder, `${prefix}.${ext}`, finallyCB)
-            const errorCB = () => {
-                this.downloadR20Resource(folder, prefix, url, finallyCB, try_files.slice(1), use_canvas)
-            }
-
-            if (use_canvas) {
-                this.downloadImageViaCanvas(new_url, successCB, errorCB)
-            } else {
-                this.downloadResource(new_url, successCB, errorCB)
-            }
-        } else {
-            if (use_canvas) {
-                this.console.log("Couldn't download ", url, " with any alternative filename. Resource has become unavailable")
-                finallyCB()
-            } else {
-                this.downloadR20Resource(folder, prefix, url, finallyCB, undefined, true)
-            }
+    // Every host spelling is tried at each resolution before dropping to a smaller
+    // one (Conv-B048): 97% of the assets one conversion reported as missing were
+    // still downloadable from the renamed host.
+    downloadR20Resource(folder, prefix, url, finallyCB, candidates = null, use_canvas = false, record = null) {
+        if (record === null) {
+            record = this.report.beginAsset(url, this._zipPath(folder, prefix))
+            candidates = assetCandidates(url)
         }
+        if (candidates.length === 0) {
+            if (!use_canvas) {
+                this.downloadR20Resource(folder, prefix, url, finallyCB, assetCandidates(url), true, record)
+                return
+            }
+            this.console.log("Couldn't download ", url, " from any host or resolution. Resource has become unavailable")
+            this.report.failed(record, { reason: "no host or resolution variant could be downloaded, and the canvas fallback failed" })
+            finallyCB()
+            return
+        }
+
+        const candidate = candidates[0]
+        const next = () => this.downloadR20Resource(folder, prefix, url, finallyCB, candidates.slice(1), use_canvas, record)
+        const store = (blob) => this._storeAsset(folder, prefix, url, blob, candidate, record, finallyCB, use_canvas)
+
+        if (use_canvas) {
+            this.downloadImageViaCanvas(candidate.url, store, () => {
+                this.report.attempted(record, candidate.url, null, "canvas fallback could not decode the image")
+                next()
+            })
+        } else {
+            this.downloadResource(candidate.url, store, next, undefined, 10, record)
+        }
+    }
+
+    _extensionOf(url) {
+        const parts = url.split("/").slice(-1)[0].split("?")[0].split(".")
+        return parts.length > 1 ? parts[parts.length - 1] : "png"
+    }
+
+    _storeAsset(folder, prefix, url, blob, candidate, record, finallyCB, use_canvas) {
+        // The stored name keeps the extension from the source URL even when the
+        // canvas fallback re-encoded the image to PNG: R20Converter looks the file
+        // up in the zip under that name, so renaming it here loses the asset
+        // downstream. The real type is reported instead (GH #11).
+        const filename = `${prefix}.${this._extensionOf(url)}`
+        this._addFileToZip(folder, filename, blob)
+        this.report.succeeded(record, {
+            path: this._zipPath(folder, filename),
+            servedFrom: candidate.url,
+            variant: candidate.variant,
+            bytes: blob && blob.size !== undefined ? blob.size : null,
+            contentType: blob && blob.type ? blob.type : null,
+            outcome: use_canvas ? OUTCOME.CANVAS
+                : (candidate.variant && candidate.variant !== "original" ? OUTCOME.LOWER_RES : OUTCOME.BUNDLED),
+        })
+        this._hashAsset(record, blob, finallyCB)
+    }
+
+    // Hashing holds the zip state machine open, so the manifests are never
+    // written before every hash is in.
+    _hashAsset(record, blob, done) {
+        const subtle = window.crypto && window.crypto.subtle
+        if (!blob || typeof blob.arrayBuffer !== "function" || !subtle) {
+            done()
+            return
+        }
+        const id = this.newPendingOperation("Hashing " + record.path)
+        const finish = () => {
+            this.completedOperation(id)
+            done()
+        }
+        blob.arrayBuffer()
+            .then((buffer) => subtle.digest("SHA-256", buffer))
+            .then((digest) => {
+                record.sha256 = Array.from(new Uint8Array(digest))
+                    .map((b) => b.toString(16).padStart(2, "0")).join("")
+                finish()
+            })
+            .catch(() => finish())
     }
 
     _makeNameUnique(names, orig_name) {
@@ -889,10 +1005,20 @@ class R20Exporter {
         }
     }
 
-    _makeAddBlobToZip(folder, filename, finallyCB) {
-        return (blob) => {
+    _makeAddBlobToZip(folder, filename, finallyCB, record = null, details = null) {
+        return (blob, servedFrom) => {
             this._addFileToZip(folder, filename, blob)
-            finallyCB();
+            if (!record) {
+                finallyCB();
+                return
+            }
+            this.report.succeeded(record, Object.assign({
+                path: this._zipPath(folder, filename),
+                servedFrom: servedFrom || null,
+                bytes: blob && blob.size !== undefined ? blob.size : null,
+                contentType: blob && blob.type ? blob.type : null,
+            }, details || {}))
+            this._hashAsset(record, blob, finallyCB)
         }
     }
 
@@ -933,20 +1059,28 @@ class R20Exporter {
             this.downloadR20Resource(folder, "avatar", pdf.avatar, finallyCB)
         if ((pdf.assetId || "") != "") {
             const id = this.newPendingOperation("Adding PDF to zip: " + pdf.assetId)
+            const asset_url = `/user_assets/pdfs/${pdf.assetId}`
+            const record = this.report.beginAsset(asset_url, this._zipPath(folder, "file.pdf"), "pdf")
             const controller = new AbortController();
             let timeoutId = null;
-            this.fetchWithTimeout(`/user_assets/pdfs/${pdf.assetId}`, {}, controller)
+            this.fetchWithTimeout(asset_url, {}, controller)
             .then(resp => {
-                timeoutId = this.timeoutHangingFetch(controller, `/user_assets/pdfs/${pdf.assetId}`);
+                timeoutId = this.timeoutHangingFetch(controller, asset_url);
                 return resp.json();
             })
             .then(json => {
                 clearInterval(timeoutId);
-                this.downloadResource(json.asset_url, this._makeAddBlobToZip(folder, "file.pdf", finallyCB), finallyCB);
+                this.downloadResource(json.asset_url,
+                    this._makeAddBlobToZip(folder, "file.pdf", finallyCB, record),
+                    (error) => {
+                        this.report.failed(record, { reason: (error && error.reason) || "download failed", status: error && error.status })
+                        finallyCB()
+                    }, undefined, 10, record);
                 this.completedOperation(id);
             })
             .catch(err => {
                 clearInterval(timeoutId);
+                this.report.failed(record, { reason: "could not resolve the PDF asset url: " + err })
                 this.completedOperation(id);
                 finallyCB();
             })
@@ -1011,19 +1145,22 @@ class R20Exporter {
                         let filename = track.track_id.split(".mp3-")[0] + ".mp3"
                         filename = encodeURIComponent(filename.replace(/%20%2D%20/g, " - "))
                         const id = this.newPendingOperation("Downloading battlebards track " + filename)
+                        const record = this.report.beginAsset("battlebards:" + track.track_id, this._zipPath(folder, name), "audio")
                         const _makePostCB = (folder, name, finallyCB, id) => {
                             return (url) => {
-                                const errorCB = () => {
+                                const errorCB = (error) => {
                                     this.console.log("Couldn't download Jukebox audio from url : ", url)
+                                    this.report.failed(record, { reason: (error && error.reason) || "download failed", status: error && error.status })
                                     finallyCB();
                                 }
-                                this.downloadResource(url, this._makeAddBlobToZip(folder, name, finallyCB), errorCB)
+                                this.downloadResource(url, this._makeAddBlobToZip(folder, name, finallyCB, record), errorCB, undefined, 10, record)
                                 this.completedOperation(id)
                             }
                         }
                         const _makePostErrorCB = (track_id, finallyCB, id) => {
                             return () => {
                                 this.console.log("Couldn't download Jukebox audio from Battlebards : ", track_id)
+                                this.report.failed(record, { reason: "Battlebards did not return a url for this track" })
                                 this.completedOperation(id)
                                 finallyCB()
                             }
@@ -1033,12 +1170,19 @@ class R20Exporter {
                             .fail(_makePostErrorCB(track.track_id, finallyCB, id))
                     } else {
                         this.console.log("Can't download Audio track (", track.title, "). Unsupported source : ", track.source)
+                        this.report.skipped(this.report.beginAsset("", this._zipPath(folder, name), "audio"),
+                            "unsupported jukebox source: " + track.source)
                     }
                     if (url) {
+                        const record = this.report.beginAsset(url, this._zipPath(folder, name), "audio")
                         const errorCB = (url) => {
-                            return () => this.console.log("Couldn't download Jukebox audio from url : ", url)
+                            return (error) => {
+                                this.console.log("Couldn't download Jukebox audio from url : ", url)
+                                this.report.failed(record, { reason: (error && error.reason) || "download failed", status: error && error.status })
+                                finallyCB()
+                            }
                         }
-                        this.downloadResource(url, this._makeAddBlobToZip(folder, name, finallyCB), errorCB(url))
+                        this.downloadResource(url, this._makeAddBlobToZip(folder, name, finallyCB, record), errorCB(url), undefined, 10, record)
                     }
                 } else {
                     this.console.log("Can't find Audio Track with ID : ", track)
@@ -1205,6 +1349,25 @@ class R20Exporter {
         checkZipDone(true)
     }
 
+    _saveCampaignZipManifests(checkZipDone) {
+        this.console.log("Writing export manifests")
+        this.console.setLabel1("Writing export manifests (10/" + this.TOTAL_STEPS + ")")
+        this.console.setProgress1(9, this.TOTAL_STEPS)
+        const id = this.newPendingOperation("Writing export manifests")
+        try {
+            this.report.characterSheet = detectCharacterSheet(this.campaign, window)
+            this.report.setCollectionCounts(exportedCollectionCounts(this.campaign), this._live_counts)
+            this._addFileToZip(this.zip, "export_report.json", this.jsonToBlob(this.report.toJSON()))
+            this._addFileToZip(this.zip, "integrity.json", this.jsonToBlob(buildIntegrity(this.campaign)))
+            this._addFileToZip(this.zip, "index.json", this.jsonToBlob(buildIndex(this.campaign)))
+        } catch (err) {
+            this.console.error("Could not write the export manifests: ", err)
+        }
+        this.savingStep = 8
+        this.completedOperation(id)
+        checkZipDone(true)
+    }
+
     saveCampaignZip(filename = null) {
         if (this.zip !== null) {
             this.console.error("Saving already in progress. Can't be cancelled.")
@@ -1241,6 +1404,8 @@ class R20Exporter {
                 setTimeout(() => this._saveCampaignZipDecks(checkZipDone), 0)
             } else if (this.savingStep == 6) {
                 setTimeout(() => this._saveCampaignZipTables(checkZipDone), 0)
+            } else if (this.savingStep == 7) {
+                setTimeout(() => this._saveCampaignZipManifests(checkZipDone), 0)
             } else {
                 setTimeout(() => {
                     this._saveZipToFile(this.zip, this._zip_filename)
@@ -1257,8 +1422,10 @@ class R20Exporter {
 
     exportCampaignZip(filename = null) {
         this.clearConsole("Exporting Campaign to ZIP file")
-        this.TOTAL_STEPS = 10;
+        this.TOTAL_STEPS = 11;
         this.console.show()
+        if (!this.checkEngine())
+            return
         this.parseCampaign((campaign) => this.saveCampaignZip(filename))
     }
 
