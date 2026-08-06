@@ -3,6 +3,7 @@
 	"version": "1.0.0",
 	"manifest_version": 3,
 	"description": "Export a Roll20 Campaign with all its assets to a ZIP file.",
+	"minimum_chrome_version": "111",
 	"host_permissions": [
 		"*://app.roll20.net/editor/"
 	],

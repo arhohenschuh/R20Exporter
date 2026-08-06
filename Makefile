@@ -1,8 +1,7 @@
 all: test build
 
-build: 
-	rm -f *~ */*~ */*/*~
-	web-ext build --ignore-files package.json package-lock.json "tests/**" "tools/**" "docs/**" "node_modules/**"
+build:
+	node tools/build.js
 
 test:
 	node --test "tests/**/*.test.js"
