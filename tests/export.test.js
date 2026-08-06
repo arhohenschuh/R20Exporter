@@ -133,3 +133,31 @@ test("the shipped version is the version in the manifest", () => {
     const { R20EXPORTER_VERSION } = require("../src/R20ExportManifests.js");
     assert.equal(manifest.version, R20EXPORTER_VERSION);
 });
+
+test("the dialog can be dismissed once the run is over, and not before", async () => {
+    const page = createExporter(exportOptions());
+    assert.equal(page.exporter.console.closeShown, false, "the overlay must stay while the campaign is being read");
+    page.exporter.exportCampaignZip();
+    await waitFor(() => page.recorder.saved.length > 0, { label: "the export to finish" });
+    assert.equal(page.exporter.console.closeShown, true);
+    page.stop();
+});
+
+test("a refused export can still be dismissed", async () => {
+    const page = createExporter(exportOptions());
+    page.sandbox.BackboneFirebase = undefined;
+    await page.exporter.exportCampaignZip();
+    // Nothing runs after a guard refusal, so without this the dialog is stuck.
+    assert.equal(page.exporter.console.closeShown, true);
+    page.stop();
+});
+
+test("the dialog declares its own colours instead of inheriting Roll20's", () => {
+    const source = fs.readFileSync(path.join(__dirname, "..", "src", "R20Exporter.js"), "utf8");
+    const css = source.slice(source.indexOf("/* The Modal (background) */"), source.indexOf(".replace(/modal/g"));
+    for (const selector of [".modal-content", ".modal-content .log", ".modal-content .warn", ".modal-content .error"]) {
+        const block = css.slice(css.indexOf(selector + " {"));
+        const body = block.slice(0, block.indexOf("}"));
+        assert.match(body, /color:/, selector + " must set a text colour; Roll20's page colour is near-white");
+    }
+});

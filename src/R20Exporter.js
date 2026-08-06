@@ -40,6 +40,7 @@ class R20Exporter {
             for (const pending of guard.loading)
                 this.console.error(pending.why)
             this.console.error("Nothing was exported. Wait until the campaign is on screen, then export again.")
+            this.console.showClose()
             return false
         }
         if (!guard.ok) {
@@ -48,6 +49,7 @@ class R20Exporter {
             this.console.error("Missing or changed page internals: " + names)
             this.console.error("Nothing was exported. Please report this at " +
                 "<a href='https://github.com/kakaroto/R20Exporter/issues' target='_blank'>the issue tracker</a>.")
+            this.console.showClose()
         }
         return guard.ok
     }
@@ -292,6 +294,7 @@ class R20Exporter {
                 this.console.error("You have run out of disk space for this browser profile. Free some space, or " +
                     "choose a save location when the export starts so the zip is written straight to disk.")
             }
+            this.console.showClose()
             $("#r20exporter-log").show();
         } finally {
             try {
@@ -305,6 +308,7 @@ class R20Exporter {
     _reportFailuresToUser() {
         const failures = this.report.failures
         const mismatches = this.report.collectionMismatches
+        this.console.showClose()
         if (failures.length === 0 && mismatches.length === 0) {
             setTimeout(() => this.console.hide(), 10000);
             return
@@ -775,6 +779,7 @@ class R20Exporter {
         saveAs(this.jsonToBlob(this.campaign), filename || this.title + ".json")
         this.console.warn("Congratulations! The campaign.json file was generated successfully.")
         this.console.setProgress1(this.TOTAL_STEPS, this.TOTAL_STEPS)
+        this.console.showClose()
         setTimeout(() => this.console.hide(), 10000);
         $("#r20exporter-log").show();
     }
@@ -1546,6 +1551,9 @@ class R20ExporterModalWindow {
             /* Modal Content */
             .modal-content {
                 background-color: #fefefe;
+                /* Roll20's page colour is near-white and was being inherited, which
+                   is what made the gold warning band unreadable. */
+                color: #1a1a1a;
                 margin: auto;
                 padding: 20px;
                 border: 3px solid #333;
@@ -1554,6 +1562,10 @@ class R20ExporterModalWindow {
                 height: 80%;
                 overflow: auto; /* Enable scroll if needed */
                 overflow-x: hidden; /* Disable horizontal scroll */
+            }
+            .modal-content a {
+                color: #0b5ed7;
+                text-decoration: underline;
             }
             .modal-content .title {
                 position: relative;
@@ -1567,15 +1579,35 @@ class R20ExporterModalWindow {
                 font-weight: bold;
             }
             .modal-content .log {
-                background-color: #ddd;
+                background-color: #eeeeee;
+                color: #1a1a1a;
             }
             .modal-content .warn {
-                background-color: gold;
+                background-color: #ffd45e;
+                color: #1a1a1a;
                 font-style: italic;
             }
             .modal-content .error {
-                background-color: red;
+                background-color: #b3261e;
+                color: #ffffff;
                 font-weight: bold;
+            }
+            .modal-content .error a {
+                color: #ffd9d5;
+            }
+            .modal-content .dismiss {
+                display: none;
+                text-align: center;
+                margin-top: 12px;
+            }
+            .modal-content .dismiss button {
+                font: inherit;
+                padding: 6px 32px;
+                cursor: pointer;
+                border: 1px solid #333;
+                border-radius: 6px;
+                background-color: #e8e8e8;
+                color: #1a1a1a;
             }
         `.replace(/modal/g, modalClass)
         $("body").append($("<style>" + css + "</style>"))
@@ -1601,6 +1633,17 @@ class R20ExporterModalWindow {
         this.content.append($('<div class="warn"></div>'))
         this.content.append($('<div class="error"></div>'))
         this.content.append($('<details class="log"><summary>Log</summary></details>'))
+        this.dismiss_row = $('<div class="dismiss"><button type="button">OK</button></div>')
+        this.dismiss_row.find("button").on("click", () => this.hide())
+        this.content.append(this.dismiss_row)
+        this.closeShown = false
+    }
+
+    // Revealed only once the run is over: while it is going, this overlay is what
+    // stops the user editing the campaign being read underneath it.
+    showClose() {
+        this.closeShown = true
+        this.dismiss_row.css("display", "block")
     }
 
     hide() {
