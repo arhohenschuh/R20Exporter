@@ -103,7 +103,7 @@ test("the engine guard fails loudly on a page it does not understand", () => {
             toJSON: () => ({}),
             characters: { models: [] },
             handouts: { models: [] },
-            pages: { models: [] },
+            pages: { models: [{ id: "p1" }] },
             players: { models: [] },
         },
         BackboneFirebase: function () {},

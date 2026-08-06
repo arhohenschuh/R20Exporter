@@ -132,10 +132,4 @@ test("the shipped version is the version in the manifest", () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
     const { R20EXPORTER_VERSION } = require("../src/R20ExportManifests.js");
     assert.equal(manifest.version, R20EXPORTER_VERSION);
-    const resources = manifest.web_accessible_resources[0].resources;
-    for (const name of ["src/R20Exporter.js", "src/R20ExportManifests.js"]) {
-        assert.ok(resources.includes(name), name + " must be reachable from the page");
-    }
-    const contentScript = fs.readFileSync(path.join(__dirname, "..", "src", "R20ContentScript.js"), "utf8");
-    assert.ok(contentScript.includes("src/R20ExportManifests.js"), "the page must load the manifests module");
 });

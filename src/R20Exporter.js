@@ -29,6 +29,13 @@ class R20Exporter {
                 " will be missing from this export.")
             this.report.note("degraded: " + degraded.path + " unavailable (" + degraded.why + ")")
         }
+        if (guard.loading.length > 0) {
+            this.console.error("<strong>The campaign has not finished loading.</strong>")
+            for (const pending of guard.loading)
+                this.console.error(pending.why)
+            this.console.error("Nothing was exported. Wait until the campaign is on screen, then export again.")
+            return false
+        }
         if (!guard.ok) {
             const names = guard.missing.map((m) => m.path + " (" + m.why + ")").join(", ")
             this.console.error("<strong>This version of R20Exporter does not understand this Roll20 page.</strong>")
@@ -37,6 +44,27 @@ class R20Exporter {
                 "<a href='https://github.com/kakaroto/R20Exporter/issues' target='_blank'>the issue tracker</a>.")
         }
         return guard.ok
+    }
+
+    // B006: a campaign that is still arriving reports zeroes that agree with each
+    // other, so the counts are only believed once two samples in a row match.
+    _awaitStableCampaign(cb, previous = null, attempts = 0) {
+        const counts = liveCollectionCounts(window)
+        if (previous && sameCollectionCounts(previous, counts)) {
+            cb()
+            return
+        }
+        if (attempts >= 90) {
+            this.console.warn("The campaign is still changing after three minutes. Exporting what has arrived so far.")
+            this.report.note("the campaign was still loading when the export started")
+            cb()
+            return
+        }
+        this.console.setLabel1("Waiting for the campaign to load (1/" + this.TOTAL_STEPS + ")")
+        this.console.setLabel2(counts.characters + " characters, " + counts.handouts + " handouts, " +
+            counts.pages + " pages received so far")
+        this.console.setProgress1(0, this.TOTAL_STEPS)
+        setTimeout(() => this._awaitStableCampaign(cb, counts, attempts + 1), 2000)
     }
 
     _zipPath(folder, filename) {
@@ -641,15 +669,26 @@ class R20Exporter {
         if (this.completedOperation(id))
             done()
     }
-    async loadCharacterAttributes(model) {
+    // GH #34: one Firebase reference that never answers used to stall the entire
+    // export at "Saving Characters". A character that will not load is now a
+    // counted degradation instead.
+    loadCharacterAttributes(model, timeout = 30000) {
         if (!model.attribs.backboneFirebase) {
             model.attribs.backboneFirebase = new BackboneFirebase(model.attribs);
             model.abilities.backboneFirebase = new BackboneFirebase(model.abilities);
 
-            model.attribsHaveArrived = new Promise(async (resolve) => {
-                await model.attribs.backboneFirebase.reference.once('value');
-                await model.abilities.backboneFirebase.reference.once('value');
-                resolve();
+            model.attribsHaveArrived = new Promise((resolve) => {
+                let settled = false
+                const finish = (loaded) => {
+                    if (settled) return
+                    settled = true
+                    resolve(loaded)
+                }
+                setTimeout(() => finish(false), timeout)
+                Promise.resolve()
+                    .then(() => model.attribs.backboneFirebase.reference.once('value'))
+                    .then(() => model.abilities.backboneFirebase.reference.once('value'))
+                    .then(() => finish(true), () => finish(false))
             });
         }
         return model.attribsHaveArrived;
@@ -659,7 +698,8 @@ class R20Exporter {
         // .all()/.count() are Roll20 page extensions to Array.prototype, not
         // standard JS; depending on them is one more unversioned page API.
         const character_num_attributes = Campaign.characters.models.map((c) => c.attribs.length)
-        if (!character_num_attributes.every((n) => n > 0)) {
+        // [].every() is true, so an empty campaign used to skip the wait entirely (B006).
+        if (character_num_attributes.length > 0 && !character_num_attributes.every((n) => n > 0)) {
             this._waiting_empty_sheets = this._waiting_empty_sheets || {}
             const num_loaded_sheets = character_num_attributes.filter((n) => n > 0).length
             this.console.log("Waiting for character sheets to finish loading (" + num_loaded_sheets + "/" + character_num_attributes.length + ")")
@@ -670,6 +710,9 @@ class R20Exporter {
             this._waiting_empty_sheets[num_loaded_sheets] = (this._waiting_empty_sheets[num_loaded_sheets] || 0) + 5;
             if (this._waiting_empty_sheets[num_loaded_sheets] > 30) {
                 this.console.log("Waited 30 seconds with no progress. Assuming Roll 20 is being weird...")
+                this.console.warn((character_num_attributes.length - num_loaded_sheets) +
+                    " character sheet(s) never loaded and are exported without attributes. " +
+                    "They are listed in <em>export_report.json</em>.")
             } else {
                 Campaign.characters.models.forEach(model => this.loadCharacterAttributes(model));
                 return setTimeout(() => this.parseCampaign(cb), 5000)
@@ -736,7 +779,7 @@ class R20Exporter {
         this.console.show()
         if (!this.checkEngine())
             return
-        this.parseCampaign(() => this.saveCampaign(filename))
+        this._awaitStableCampaign(() => this.parseCampaign(() => this.saveCampaign(filename)))
     }
 
     exportCampaign() {
@@ -1339,6 +1382,7 @@ class R20Exporter {
         const id = this.newPendingOperation("Writing export manifests")
         try {
             this.report.characterSheet = detectCharacterSheet(this.campaign, window)
+            this.report.characterAttributes = characterAttributeSummary(this.campaign)
             this.report.setCollectionCounts(exportedCollectionCounts(this.campaign), this._live_counts)
             this._addFileToZip(this.zip, "export_report.json", this.jsonToBlob(this.report.toJSON()))
             this._addFileToZip(this.zip, "integrity.json", this.jsonToBlob(buildIntegrity(this.campaign)))
@@ -1410,7 +1454,7 @@ class R20Exporter {
         if (!this.checkEngine())
             return
         this._save_handle = await this.acquireSaveHandle(filename || (this.title + ".zip"))
-        this.parseCampaign((campaign) => this.saveCampaignZip(filename))
+        this._awaitStableCampaign(() => this.parseCampaign((campaign) => this.saveCampaignZip(filename)))
     }
 
     

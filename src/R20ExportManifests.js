@@ -20,7 +20,7 @@
 
 // Kept in step with manifest.json by tests/version.test.js. The page context
 // has no access to chrome.runtime, so the version cannot be read at runtime.
-const R20EXPORTER_VERSION = "0.14.0";
+const R20EXPORTER_VERSION = "0.15.0";
 
 const REPORT_FORMAT = "1.1";
 const INTEGRITY_FORMAT = "1.0";
@@ -60,6 +60,7 @@ class R20ExportReport {
         this.now = options.now || (() => new Date().toISOString());
         this.campaign = { id: null, title: null, release: null };
         this.characterSheet = { template: null, templates: [], source: "unavailable" };
+        this.characterAttributes = { total: 0, loaded: 0, incomplete: [] };
         this.assets = [];
         this.collections = {};
         this.collectionMismatches = [];
@@ -174,6 +175,7 @@ class R20ExportReport {
             generated_at: this.now(),
             campaign: this.campaign,
             character_sheet: this.characterSheet,
+            character_attributes: this.characterAttributes,
             totals: this.totals,
             collections: this.collections,
             collection_mismatches: this.collectionMismatches,
@@ -291,9 +293,21 @@ const ENGINE_OPTIONAL = [
     { path: "is_gm", test: (v) => v !== undefined, why: "GM detection" },
 ];
 
+// Presence is not arrival (B006). Roll20 guarantees a campaign has at least one
+// page, so an empty page list means the data has not reached the browser yet --
+// and every collection reads a convincing, agreeing zero until it does.
+const ENGINE_READINESS = [
+    {
+        path: "Campaign.pages.models",
+        test: (v) => Array.isArray(v) && v.length > 0,
+        why: "the campaign has no pages yet, so it is still loading",
+    },
+];
+
 function checkEngineGlobals(scope) {
     const missing = [];
     const degraded = [];
+    const loading = [];
     for (const requirement of ENGINE_REQUIREMENTS) {
         if (!requirement.test(_get(scope, requirement.path))) {
             missing.push({ path: requirement.path, why: requirement.why });
@@ -304,7 +318,37 @@ function checkEngineGlobals(scope) {
             degraded.push({ path: requirement.path, why: requirement.why });
         }
     }
-    return { ok: missing.length === 0, missing: missing, degraded: degraded };
+    if (missing.length === 0) {
+        for (const requirement of ENGINE_READINESS) {
+            if (!requirement.test(_get(scope, requirement.path))) {
+                loading.push({ path: requirement.path, why: requirement.why });
+            }
+        }
+    }
+    return { ok: missing.length === 0 && loading.length === 0, missing: missing, degraded: degraded, loading: loading };
+}
+
+function sameCollectionCounts(left, right) {
+    if (!left || !right) return false;
+    for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+        if (left[key] !== right[key]) return false;
+    }
+    return true;
+}
+
+// A character whose attribs never arrived exports as a name with no sheet. That
+// is a degradation to count, not a reason to fail the run (GH #34).
+function characterAttributeSummary(campaign) {
+    const incomplete = [];
+    const characters = _array(campaign.characters);
+    for (const character of characters) {
+        if (!character) continue;
+        if (_array(character.attributes).length === 0) {
+            incomplete.push({ id: _text(character.id), name: _text(character.name) });
+        }
+    }
+    incomplete.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    return { total: characters.length, loaded: characters.length - incomplete.length, incomplete: incomplete };
 }
 
 // --- the reference index ----------------------------------------------------
@@ -623,6 +667,8 @@ return {
     compareCollectionCounts,
     countChatMessages,
     checkEngineGlobals,
+    sameCollectionCounts,
+    characterAttributeSummary,
     buildIndex,
     buildIntegrity,
     detectCharacterSheet,

@@ -1,6 +1,6 @@
 {
 	"name": "R20Exporter",
-	"version": "0.14.0",
+	"version": "0.15.0",
 	"manifest_version": 3,
 	"description": "Export a Roll20 Campaign with all its assets to a ZIP file.",
 	"host_permissions": [
@@ -15,27 +15,19 @@
 		"128": "images/icons/icon128.png",
 		"256": "images/icons/icon256.png"
 	},
-	"web_accessible_resources": [
-		{
-			"resources": [
-				"src/R20Exporter.js",
-				"src/R20ExportManifests.js",
-				"libs/*/*.js"
-			],
-			"matches": [
-        		"https://app.roll20.net/*"
-      		]
-		}
-	],
 	"content_scripts": [
 		{
 			"matches": [
 				"*://app.roll20.net/editor/*"
 			],
 			"js": [
-				"src/R20ContentScript.js"
+				"libs/FileSaver/FileSaver.js",
+				"libs/zipjs/zip-fs.js",
+				"src/R20ExportManifests.js",
+				"src/R20Exporter.js"
 			],
-      		"run_at": "document_idle"
+			"run_at": "document_idle",
+			"world": "MAIN"
 		}
 	]
 }
