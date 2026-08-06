@@ -4,6 +4,9 @@
 // DOS date field in a zip cannot represent anything before 1980.
 const R20_ZIP_EPOCH = new Date(Date.UTC(1980, 0, 1, 0, 0, 0))
 
+// downloadResource retries while expBackoff < 30, so this value means "once".
+const NO_RETRY_BACKOFF = 30
+
 class R20Exporter {
     constructor(title) {
         this.title = title
@@ -13,6 +16,9 @@ class R20Exporter {
         this._total_size = 0
         this.report = new R20ExportReport()
         this._live_counts = null
+        // The save prompt is a native dialog: automation cannot click it, so it
+        // has to be switchable off rather than worked around.
+        this.usePicker = true
         this.console = new R20ExporterModalWindow("Exporting Campaign to ZIP file", "r20exporter-modal")
         this.clearConsole();
         this.TOTAL_STEPS = 11;
@@ -956,7 +962,11 @@ class R20Exporter {
                 next()
             })
         } else {
-            this.downloadResource(candidate.url, store, next, undefined, 10, record)
+            // B007: trying the next candidate and retrying this one answer the same
+            // question, and since ADR-003 the first answer is better. Only the last
+            // candidate -- where giving up means losing the asset -- gets backoff.
+            const backoff = candidates.length > 1 ? NO_RETRY_BACKOFF : 10
+            this.downloadResource(candidate.url, store, next, undefined, backoff, record)
         }
     }
 
@@ -1447,13 +1457,14 @@ class R20Exporter {
     }
 
 
-    async exportCampaignZip(filename = null) {
+    async exportCampaignZip(filename = null, options = {}) {
         this.clearConsole("Exporting Campaign to ZIP file")
         this.TOTAL_STEPS = 11;
         this.console.show()
         if (!this.checkEngine())
             return
-        this._save_handle = await this.acquireSaveHandle(filename || (this.title + ".zip"))
+        const usePicker = options.usePicker === undefined ? this.usePicker : options.usePicker
+        this._save_handle = usePicker ? await this.acquireSaveHandle(filename || (this.title + ".zip")) : null
         this._awaitStableCampaign(() => this.parseCampaign((campaign) => this.saveCampaignZip(filename)))
     }
 

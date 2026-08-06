@@ -16,3 +16,4 @@ behaviour only exists inside Roll20's page, a recorded fixture in
 | [B003](B003-host-rewrite-defeats-fallback.md) | The host rewrite in `downloadResource` defeats the fallback ladder | Fixed 0.13.0 |
 | [B004](B004-temporary-filesystem-quota.md) | The 4 GB temporary-filesystem quota fails the export at the last step | Fixed 0.14.0 |
 | [B005](B005-main-thread-zip-generation.md) | Zip generation runs on the main thread and stalls in a background tab | Fixed 0.14.0 |
+| [B006](B006-empty-export-before-campaign-loads.md) | An export started before the campaign loads silently produces an empty archive | Fixed 0.15.0 |

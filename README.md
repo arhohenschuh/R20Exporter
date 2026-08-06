@@ -23,6 +23,58 @@ The dialog that opens will show you the various steps the script is undertaking 
 
 To report any issues, please go to the GitHub [issue tracker](https://github.com/kakaroto/R20Exporter/issues).
 
+# What is in the ZIP
+
+Alongside `campaign.json` and the exported folders, every export carries three
+**sidecar** files. They add information *about* the export; nothing in the
+Roll20 data itself is ever rewritten, repaired or reordered, so the archive
+stays a neutral record of the campaign. Any tool that does not know about the
+sidecars can ignore them.
+
+### `export_report.json` — what happened
+
+The one file to read when something looks wrong.
+
+- `totals` — how many assets were referenced, and how they ended:
+  `bundled`, `bundled-lower-res`, `canvas-reencoded`, `failed`, `skipped`,
+  `pending`. **If `failed` is 0, nothing is missing.**
+- `assets[]` — one entry per referenced asset: where it landed in the zip
+  (`path`), the URL the campaign referenced (`url`), the URL that actually
+  answered (`served_from`), which resolution was stored (`variant`), the
+  `sha256` and byte count of the stored bytes, and `attempts[]` — every host and
+  resolution tried, with its HTTP status. A `failed` entry always carries a
+  `reason`.
+- `collections` — what the export contains next to what the live campaign held,
+  per collection. They should be equal; `collection_mismatches` lists any that
+  are not.
+- `character_sheet` — which sheet template the campaign uses, and where that was
+  read from. How every `attribs` field must be interpreted depends on it.
+- `character_attributes` — characters whose sheet never finished loading, and so
+  exported without attributes.
+
+### `integrity.json` — what is inconsistent in the campaign itself
+
+Findings are **flagged and never repaired**: dangling `represents` on tokens
+whose character was deleted, folder entries and journal links pointing at things
+that no longer exist, chat messages with unusable roll payloads, and pages that
+exported empty while still having a thumbnail.
+
+### `index.json` — every Roll20 id to `{type, name}`
+
+So a downstream tool can resolve a `journal.roll20.net/handout/<id>` link by
+lookup instead of guessing by name.
+
+# Automating an export
+
+`showSaveFilePicker` is a native dialog that a script cannot click. To drive an
+export from Playwright or the console without it:
+
+```js
+window.R20Exporter_instance.exportCampaignZip(null, { usePicker: false })
+```
+
+The archive is then delivered as an ordinary download.
+
 # Demo
 
 Here's a little demo to show you how it works (note that this may not reflect the latest version of the tool) :

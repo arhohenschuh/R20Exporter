@@ -218,7 +218,7 @@ function buildCampaign() {
     return { Campaign, Jukebox };
 }
 
-function buildRoutes({ deadAssets = [DEAD_ASSET], legacyOnlyAssets = [LEGACY_ONLY_ASSET] } = {}) {
+function buildRoutes({ deadAssets = [DEAD_ASSET], legacyOnlyAssets = [LEGACY_ONLY_ASSET], corsBlockedHost = "https://s3.amazonaws.com/" } = {}) {
     const variants = (url) => ["original", "max", "med", "thumb"].map((v) => url.replace(/\/(original|max|med|thumb)\./, "/" + v + "."));
     const dead = new Set();
     for (const url of deadAssets) for (const spelling of variants(url)) dead.add(spelling);
@@ -230,12 +230,16 @@ function buildRoutes({ deadAssets = [DEAD_ASSET], legacyOnlyAssets = [LEGACY_ONL
             return { body: chatArchiveHtml(), type: "text/html" };
         }
         const direct = url.replace("https://s3.amazonaws.com/files.d20.io/", "https://files.d20.io/");
-        if (dead.has(direct)) return { status: 404 };
         if (legacyOnly.has(direct)) {
             // Answers only under the legacy spelling, exactly as Roll20's CDN did
             // before the rename made the new host the working one.
             return url.startsWith(LEGACY_HOST) ? { body: "image-bytes-for:" + direct, type: "image/png" } : { status: 403 };
         }
+        if (corsBlockedHost && url.startsWith(corsBlockedHost)) {
+            // A CORS rejection never carries an HTTP status (B007).
+            return new TypeError("Failed to fetch");
+        }
+        if (dead.has(direct)) return { status: 404 };
         if (url.startsWith(IMG)) return { body: "image-bytes-for:" + url, type: "image/png" };
         if (url.endsWith(".mp3")) return { body: "audio-bytes", type: "audio/mpeg" };
         return undefined;

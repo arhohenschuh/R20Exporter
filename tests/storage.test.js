@@ -22,6 +22,22 @@ function collectingStream(sink) {
     });
 }
 
+test("the save prompt can be switched off, for automation and for impatience", async () => {
+    let pickerCalls = 0;
+    const page = createExporter(options({
+        showSaveFilePicker: async () => {
+            pickerCalls += 1;
+            throw new Error("the picker must not be opened");
+        },
+    }));
+
+    await page.exporter.exportCampaignZip(null, { usePicker: false });
+    await waitFor(() => page.recorder.saved.length > 0, { label: "the download" });
+    assert.equal(pickerCalls, 0, "no native dialog may be opened");
+    assert.equal(page.recorder.saved[0].filename, "Sunless Citadel.zip");
+    page.stop();
+});
+
 test("a save location chosen up front is streamed to, with no download", async () => {
     const sink = { chunks: [], closed: false };
     let pickedDuringClick = false;

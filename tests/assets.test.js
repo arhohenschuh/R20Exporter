@@ -70,6 +70,21 @@ test("provenance is recorded for every stored asset", async () => {
     }
 });
 
+test("a candidate that cannot be fetched is abandoned, not retried", async () => {
+    const { Campaign, Jukebox } = buildCampaign();
+    const page = await runZipExport({ campaign: Campaign, jukebox: Jukebox, routes: buildRoutes(), title: "Sunless Citadel" });
+    const requests = page.recorder.fetched.filter((u) => u.startsWith("https://s3.amazonaws.com/"));
+    page.stop();
+
+    assert.ok(requests.length > 0, "the legacy host must still be tried once");
+    const counts = {};
+    for (const url of requests) counts[url] = (counts[url] || 0) + 1;
+    const repeated = Object.entries(counts).filter(([, n]) => n > 1);
+    // B007: a CORS rejection carries no status, so backoff used to retry it three
+    // times per candidate -- twelve candidates of dead time per dead asset.
+    assert.deepEqual(repeated, [], "a candidate with somewhere else to go must be asked once");
+});
+
 test("a dead asset records every candidate it tried before giving up", async () => {
     const contents = await exportFixture();
     const report = JSON.parse(contents["export_report.json"]);

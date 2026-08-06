@@ -99,9 +99,9 @@ keep the trackers distinct.
 |---|---|---|:--:|---|
 | **R1** | 0.12.0 | Ground truth — manifests, loud failures, engine guard | No (sidecars only) | **Delivered** 6 Aug 2026 |
 | **R2** | 0.13.0 | Asset completeness — host + resolution ladder, hashes, honest types | No | **Delivered** 6 Aug 2026 |
-| **R3** | 0.14.0 | Storage & scale — OPFS, modern zip.js, worker compression | No | |
-| **R4** | 0.15.0 | Robust character export + MV3 cleanup | No | |
-| **R5** | **1.0.0** | **MVP1 — acceptance against the real converter** | No | |
+| **R3** | 0.14.0 | Storage & scale — OPFS, modern zip.js, worker compression | No | **Delivered** 6 Aug 2026 |
+| **R4** | 0.15.0 | Robust character export + MV3 cleanup | No | **Delivered** 6 Aug 2026 |
+| **R5** | **1.0.0** | **MVP1 — acceptance against the real converter** | No | **Delivered** 6 Aug 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering
@@ -456,12 +456,84 @@ editor now serves a strict CSP —
 makes R4's `world: "MAIN"` content script **load-bearing rather than cosmetic**;
 see R4.
 
+## Measured, not asserted
+
+Every number below came from a command or a live run in the session that wrote
+it. Nothing here is recalled.
+
+### The Sunless Citadel — Jumpgate, as GM, 0.13.0 then 0.14.0
+
+| Measurement | Result |
+|---|---|
+| Engine guard on the live page | `ok`, nothing missing, nothing degraded |
+| Collections exported vs live | 30/30 characters, 54/54 handouts, 4/4 pages, 287/287 graphics, 305/305 paths — **0 mismatches** |
+| Assets | 499 referenced, **498 bundled, 1 failed**, 66.6 MB |
+| The one failure | 33 candidates tried (4 resolutions × 3 hosts, then canvas), all 404 — genuinely dead |
+| Resolution | 498 of 498 served at `original`; 0 lower-res, 0 canvas-reencoded |
+| Host | 498 of 498 answered on `files.d20.io` |
+| Content hashes | 498 recorded, 183 distinct — 315 assets are shared art, which is why *repetition* must never be used to detect a placeholder |
+| Sheet template | `ogl5e`, read from `CharacterSheetsManagerSingleton.sheets` — not present in `campaign.json` at all |
+| Integrity | 1 dangling journal link, in a real shipped module |
+| Zip | 863 entries, 74.15 MB, written in **3.9 s** with workers; every mtime pinned to 1980-01-01 |
+
+### Against the previously shipped export of the same module
+
+Content compared by CRC + size with names ignored, so a renamed file cannot hide
+as a loss:
+
+| | old export | new export |
+|---|---:|---:|
+| files | 722 | 725 |
+| distinct contents | 341 | 344 |
+| names present only here | **0** | 3 |
+
+The three names only in the new export are `export_report.json`,
+`integrity.json`, `index.json`. The only *contents* that differ are
+`campaign.json` and the four `page.json` — Roll20's own volatile state. **All 336
+asset contents are byte-identical**, so R3's rewrite of the save pipeline is
+lossless against a known-good baseline rather than merely "about the same size".
+
+### Curse of Strahd — the campaign that found B006
+
+181 characters, 363 handouts, 50 pages (49 archived), 40 tables, 6 decks. For
+~2 minutes after `Campaign` becomes usable every collection reads 0, and 0.14.0
+would have exported an empty archive and reported success. With 0.15.0 the guard
+returns `ok: false, loading: [Campaign.pages.models]` and refuses to start.
+
+Exported in full on 1.0.0, as the scale test R3 never had:
+
+| Measurement | Result |
+|---|---|
+| Assets | 3,877 referenced, **3,876 bundled, 1 failed**, 1.38 GB |
+| Collections exported vs live | 181/181 characters, 363/363 handouts, 50/50 pages, 2,046/2,046 graphics, 2,257/2,257 paths, 50/50 texts, 40/40 tables, 6/6 decks, 18/18 macros — **0 mismatches** |
+| Character sheets | 181 of 181 loaded, **0 incomplete** — the GH #34 path, clean |
+| Sheet templates | **two in use**: `dnd2024byroll20` and `ogl5e`. A single-valued field would have hidden one of them |
+| Content hashes | 3,876 recorded, 1,023 distinct |
+| Whole export | 426 s, of which **54 s** to write the 1.38 GB / 6,670-entry archive |
+| Archive | valid, layout unchanged, every mtime pinned to 1980-01-01 |
+
+### R5 acceptance — through the real converter
+
+`python src/main.py --overwrite --dedup-assets <dest> "The Sunless Citadel.zip"`
+against R20Converter **v1.7.3**, unmodified:
+
+| | B049 baseline | 1.0.0 |
+|---|---:|---:|
+| `Cannot find file … in Zip` | **116** | **1** |
+| of those, still downloadable at conversion time | 112 | 0 |
+
+The conversion completes. The single miss is the asset `export_report.json`
+already declared `failed`, and the converter reached the same verdict
+independently — 404 on `files.d20.io` and 403 on `s3.amazonaws.com`, at all four
+resolutions. That is the gate as written: zero misses, **or** every miss listed
+with a human-checkable reason.
+
 ## Sources
 
 - R20Converter: `ROADMAP.md`, `docs/adr/ADR-001…009`, `docs/bugs/B048, B049,
   B050, B052`, `src/R20Converter.py`, `src/entities/{base,scenes,actors}.py`
-- R20Exporter: `src/R20Exporter.js`, `src/R20ContentScript.js`,
-  `manifest.json`, git history through 0.11.0
+- R20Exporter: `src/R20Exporter.js`, `src/R20ExportManifests.js`,
+  `manifest.json`, git history through 0.15.0
 - Downstream field feedback (2026-08): asset-rot and token-integrity audit
   across six shipped conversions; repair programme O8; gate G21.
 - Roll20 engine status: [Jumpgate — Roll20 Help Center](https://help.roll20.net/hc/en-us/articles/21569402281495-Jumpgate),
