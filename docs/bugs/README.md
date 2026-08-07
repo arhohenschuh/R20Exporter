@@ -17,3 +17,4 @@ behaviour only exists inside Roll20's page, a recorded fixture in
 | [B004](B004-temporary-filesystem-quota.md) | The 4 GB temporary-filesystem quota fails the export at the last step | Fixed 0.14.0 |
 | [B005](B005-main-thread-zip-generation.md) | Zip generation runs on the main thread and stalls in a background tab | Fixed 0.14.0 |
 | [B006](B006-empty-export-before-campaign-loads.md) | An export started before the campaign loads silently produces an empty archive | Fixed 0.15.0 |
+| [B007](B007-cors-candidate-retried.md) | A CORS-blocked candidate is retried with backoff, multiplying dead time | Fixed 1.0.0 |
