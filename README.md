@@ -86,6 +86,22 @@ campaign: a consumer can import every one of thousands of journal entries into a
 single flat folder and every count will still match. Compare `folders.journal`
 after conversion, not the entry count.
 
+`scene_barriers` records, per page, how that page says "door". Roll20 has two
+incompatible answers and only the export sees both:
+
+- **`native`** — the page carries real `doors` objects (Jumpgate / UDL).
+- **`colour`** — legacy dynamic lighting, which has **no door object at all**. A door
+  is a wall-layer path drawn in a different `stroke`, a convention rather than a
+  field. `stroke_segments` gives the segment count per colour so the minority colour
+  is identifiable.
+- **`single-colour`** / **`none`** — nothing to infer.
+
+A consumer that guesses wrong either loses every door on a legacy page or invents
+doors on a modern one, and **one campaign can hold both encodings on different
+pages**. `udl_auto_converted` flags a page whose legacy layer Roll20 may already have
+deleted during its own migration — for those, an older export can be the only
+surviving copy of the door positions.
+
 # Automating an export
 
 `showSaveFilePicker` is a native dialog that a script cannot click. To drive an

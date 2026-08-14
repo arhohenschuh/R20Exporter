@@ -250,8 +250,75 @@ test("two sibling folders sharing a name are reported, not collapsed", () => {
     assert.deepEqual(folders.journal.duplicate_paths, ["Maps"]);
 });
 
-test("a stored name Foundry cannot draw is flagged rather than renamed", () => {
-    const report = new R20ExportReport({ now: NOW });
+// Roll20 says "door" two incompatible ways and only the export sees both. Measured:
+// 11 of 22 archived campaigns carry no door objects at all, and one module can hold
+// both encodings on different pages.
+const page = (over = {}) => Object.assign({
+    id: "pg", name: "Map", graphics: [], texts: [], thumbnail: "",
+    paths: [], doors: [], windows: [],
+}, over);
+
+const wall = (stroke, segments, barrierType) => ({
+    layer: "walls", stroke, barrierType,
+    path: Array.from({ length: segments + 1 }, (_, i) => ["L", i, i]),
+});
+
+test("a page with door objects is recorded as the native encoding", () => {
+    const { scene_barriers } = buildIndex(campaign({
+        pages: [page({ id: "hrak", name: "Hrakhamar", doors: [{ id: "d1" }, { id: "d2" }], paths: [wall("#0000ff", 40)] })],
+    }), { now: NOW });
+    const p = scene_barriers.pages.hrak;
+    assert.equal(p.door_encoding, "native");
+    assert.equal(p.doors, 2);
+});
+
+test("a page with no door objects and two wall colours is the legacy encoding", () => {
+    const { scene_barriers } = buildIndex(campaign({
+        pages: [page({ id: "cass", name: "Cassalanter Villa", paths: [wall("#0000ff", 247), wall("#ff9900", 70)] })],
+    }), { now: NOW });
+    const p = scene_barriers.pages.cass;
+    assert.equal(p.door_encoding, "colour");
+    assert.equal(p.doors, 0);
+    assert.deepEqual(p.stroke_segments, { "#0000ff": 247, "#ff9900": 70 });
+});
+
+test("one campaign can hold both encodings, and the totals say so", () => {
+    const { scene_barriers } = buildIndex(campaign({
+        pages: [
+            page({ id: "sarg", name: "Sargauth", doors: [{ id: "d" }], paths: [wall("#0000ff", 100), wall("#ff9900", 8)] }),
+            page({ id: "twist", name: "Twisted Caverns", paths: [wall("#0000ff", 7229), wall("#ff9900", 12)] }),
+            page({ id: "plain", name: "Plain", paths: [wall("#0000ff", 10)] }),
+            page({ id: "bare", name: "No walls" }),
+        ],
+    }), { now: NOW });
+    assert.equal(scene_barriers.pages.sarg.door_encoding, "native");
+    assert.equal(scene_barriers.pages.twist.door_encoding, "colour");
+    assert.equal(scene_barriers.pages.plain.door_encoding, "single-colour");
+    assert.equal(scene_barriers.pages.bare.door_encoding, "none");
+    assert.equal(scene_barriers.totals.pages, 4);
+    assert.equal(scene_barriers.totals.native, 1);
+    assert.equal(scene_barriers.totals.colour, 1);
+});
+
+test("one-way and transparent barriers are counted but never carry a door colour", () => {
+    const { scene_barriers } = buildIndex(campaign({
+        pages: [page({ id: "mix", paths: [wall("#0000ff", 10), wall("#00ff00", 5, "oneWay"), wall("#ff00ff", 3, "transparent")] })],
+    }), { now: NOW });
+    const p = scene_barriers.pages.mix;
+    assert.deepEqual(p.barrier_types, { wall: 1, oneWay: 1, transparent: 1 });
+    assert.deepEqual(p.stroke_segments, { "#0000ff": 10 }, "only plain barriers are colour-keyed");
+    assert.equal(p.door_encoding, "single-colour");
+});
+
+test("a page Roll20 auto-converted to UDL is flagged, because its legacy layer may be gone", () => {
+    const { scene_barriers } = buildIndex(campaign({
+        pages: [page({ id: "lost", name: "Cassalanter Villa", paths: [], udl_auto_converted: true })],
+    }), { now: NOW });
+    assert.equal(scene_barriers.pages.lost.udl_auto_converted, true);
+    assert.equal(scene_barriers.pages.lost.door_encoding, "none");
+});
+
+test("a stored name Foundry cannot draw is flagged rather than renamed", () => {    const report = new R20ExportReport({ now: NOW });
     // The exporter keeps the URL's extension on purpose (ADR-003) -- 139 such
     // members exist across the archived exports -- so it has to say so.
     const bad = report.beginAsset("https://files.d20.io/images/a/original.svg&cb=5", "pages/1/graphics/a");

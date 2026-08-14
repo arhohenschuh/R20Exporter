@@ -103,6 +103,7 @@ keep the trackers distinct.
 | **R4** | 0.15.0 | Robust character export + MV3 cleanup | No | **Delivered** 6 Aug 2026 |
 | **R5** | **1.0.0** | **MVP1 — acceptance against the real converter** | No | **Delivered** 6 Aug 2026 |
 | **R6** | 1.1.0 | Structure & renderability — the folder oracle | One, declared | **Delivered** 14 Aug 2026 |
+| **R7** | 1.2.0 | Scene barriers — which encoding says "door" | No | **Delivered** 14 Aug 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering
@@ -401,6 +402,51 @@ archived *Storm over Savage Frontier* export: 68 journal folders, max depth 3,
 `The Iron Fist - Khundrukar - Forge of Fury/Magic Items/Potions`; 1,151 ids
 indexed. The 139 non-renderable members were found by scanning every archived
 export ZIP, not by recall.
+
+---
+
+### R7 · 1.2.0 — Scene barriers: which encoding says "door"
+
+Roll20 has two incompatible ways of expressing a door and **only the export sees
+both**. Jumpgate/UDL pages carry real `doors` objects. Legacy dynamic lighting has
+no door object at all — a door is a wall-layer path drawn in a different `stroke`,
+a *convention* rather than a field.
+
+A consumer that guesses wrong fails in both directions: it loses every door on a
+legacy page, or invents doors on a modern one. Downstream did the first. The
+converter's door detection sat behind a flag its GUI defaulted on and its CLI
+defaulted off, so the same campaign kept or lost its doors depending on the entry
+point, and every doorway on a legacy page became a solid wall (`Conv-B058`).
+
+`index.json` therefore gains `scene_barriers`, per page:
+
+- `door_encoding` — `native` · `colour` · `single-colour` · `none`
+- `doors` / `windows` counts, `wall_paths`, `barrier_types`
+- `stroke_segments` — segment count per stroke colour, so the minority colour that
+  encodes doors is identifiable rather than guessed
+- `udl_auto_converted` — flagged, never repaired
+
+That last flag matters more than it looks: Roll20's own UDL migration can delete a
+page's legacy layer outright, leaving `paths: 0`. **An older export can be the only
+surviving copy of those door positions**, which makes archived exports irreplaceable
+rather than merely convenient.
+
+*Deliberately excluded:* deciding what the door colour *means*. The export records
+the distribution; classification is the consumer's job and it now has the evidence to
+do it per page. Format `1.1` → `1.2`.
+
+**Gate:** a page with door objects reports `native` · a page with none and two
+colours reports `colour` with per-colour segment counts · one campaign holding both
+encodings reports both · one-way and transparent barriers are counted but never
+colour-keyed · a UDL-converted page is flagged.
+
+**Gate result — measured 14 Aug 2026.** Offline suite **55/55**. Cross-checked
+against the archived *Waterdeep — Dragon Heist* export and an independent
+measurement of the same data: **46 pages, 40 `colour`, 0 `native`**, with
+Cassalanter Villa at `#0000ff`:247 / `#ff9900`:70 and Temple of Asmodeus at
+`#0000ff`:448 / `#ff9900`:85 — identical to the independent count. Across the
+archived exports, **11 of 22 campaigns carry no door objects at all** and `#ff9900`
+is the door colour in every campaign checked.
 
 ---
 

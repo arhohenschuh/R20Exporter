@@ -20,11 +20,11 @@
 
 // Kept in step with manifest.json by tests/version.test.js. The page context
 // has no access to chrome.runtime, so the version cannot be read at runtime.
-const R20EXPORTER_VERSION = "1.1.0";
+const R20EXPORTER_VERSION = "1.2.0";
 
 const REPORT_FORMAT = "1.2";
 const INTEGRITY_FORMAT = "1.0";
-const INDEX_FORMAT = "1.1";
+const INDEX_FORMAT = "1.2";
 
 const OUTCOME = {
     PENDING: "pending",
@@ -415,12 +415,85 @@ function buildIndex(campaign, options = {}) {
         generated_at: now(),
         count: entries.length,
         folders: folders.trees,
+        scene_barriers: buildSceneBarriers(campaign),
         entries: index,
     };
 }
 
-// --- the folder structure ---------------------------------------------------
+// --- scene barriers ---------------------------------------------------------
 
+// Roll20 has two incompatible ways of saying "door" and the export is the only place
+// both are visible. Legacy dynamic lighting has no door object at all -- a door is a
+// wall-layer path drawn in a different stroke colour, a convention rather than a field --
+// while Jumpgate/UDL pages carry real `doors`. A consumer that guesses wrong either
+// loses every door on a legacy page or invents doors on a modern one, and one campaign
+// can hold both encodings on different pages.
+//
+// Recording it here costs nothing and makes the downstream question answerable instead
+// of inferred: how many doors should this scene have?
+const WALL_LAYER = "walls";
+
+function _segmentCount(path) {
+    // Legacy stores a flat "M,39,0,L,0,2" string, Jumpgate a real [["M",x,y]] array,
+    // and `points` is usually null. Assuming one form silently counts zero.
+    if (Array.isArray(path.path)) return Math.max(0, path.path.length - 1);
+    if (Array.isArray(path.points) && path.points.length) return Math.max(0, path.points.length - 1);
+    if (typeof path.path === "string") {
+        try {
+            const parsed = JSON.parse(path.path);
+            if (Array.isArray(parsed)) return Math.max(0, parsed.length - 1);
+        } catch (e) { /* flat string form */ }
+        return Math.max(0, (path.path.match(/[ML]/g) || []).length - 1);
+    }
+    return 0;
+}
+
+function buildSceneBarriers(campaign) {
+    const pages = {};
+    const totals = { pages: 0, native: 0, colour: 0, single_colour: 0, none: 0, doors: 0, windows: 0 };
+    for (const page of _array(campaign.pages)) {
+        if (!page || page.id === undefined || page.id === null) continue;
+        const wallPaths = _array(page.paths).filter((p) => p && p.layer === WALL_LAYER);
+        const barrierTypes = {};
+        const strokes = {};
+        for (const p of wallPaths) {
+            const type = _text(p.barrierType) || "wall";
+            barrierTypes[type] = (barrierTypes[type] || 0) + 1;
+            // Only a plain barrier can carry a door colour; one-way and transparent
+            // barriers are their own thing and the converter excludes them too.
+            if (type !== "wall") continue;
+            const stroke = _text(p.stroke);
+            strokes[stroke] = (strokes[stroke] || 0) + _segmentCount(p);
+        }
+        const doors = _array(page.doors).length;
+        const windows = _array(page.windows).length;
+        const distinct = Object.keys(strokes).length;
+        const encoding = doors > 0 ? "native"
+            : distinct > 1 ? "colour"
+                : distinct === 1 ? "single-colour" : "none";
+
+        pages[String(page.id)] = {
+            name: _text(page.name),
+            doors: doors,
+            windows: windows,
+            wall_paths: wallPaths.length,
+            barrier_types: barrierTypes,
+            stroke_segments: strokes,
+            door_encoding: encoding,
+            // Roll20's own UDL migration can delete the legacy layer outright, so a page
+            // that once held colour-coded doors comes back with none. Flagged, never
+            // repaired -- the older export may be the only surviving copy.
+            udl_auto_converted: page.udl_auto_converted === true,
+        };
+        totals.pages += 1;
+        totals[encoding.replace("-", "_")] += 1;
+        totals.doors += doors;
+        totals.windows += windows;
+    }
+    return { totals, pages };
+}
+
+// --- the folder structure ---------------------------------------------------
 // Preserving every document is not the same as preserving the campaign: a
 // consumer can rebuild all 5,108 journal entries into one flat list and every
 // count still matches. The tree is therefore recorded explicitly so downstream
@@ -757,6 +830,7 @@ return {
     characterAttributeSummary,
     buildIndex,
     buildFolderStructure,
+    buildSceneBarriers,
     buildIntegrity,
     detectCharacterSheet,
     hostCandidates,
