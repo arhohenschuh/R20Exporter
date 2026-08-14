@@ -20,11 +20,11 @@
 
 // Kept in step with manifest.json by tests/version.test.js. The page context
 // has no access to chrome.runtime, so the version cannot be read at runtime.
-const R20EXPORTER_VERSION = "1.2.0";
+const R20EXPORTER_VERSION = "1.3.0";
 
 const REPORT_FORMAT = "1.2";
 const INTEGRITY_FORMAT = "1.0";
-const INDEX_FORMAT = "1.2";
+const INDEX_FORMAT = "1.3";
 
 const OUTCOME = {
     PENDING: "pending",
@@ -432,6 +432,27 @@ function buildIndex(campaign, options = {}) {
 // Recording it here costs nothing and makes the downstream question answerable instead
 // of inferred: how many doors should this scene have?
 const WALL_LAYER = "walls";
+const WALL_BARRIER = "wall";
+
+function _normalizeStroke(value) {
+    const token = _text(value).trim().toLowerCase();
+    if (token === "transparent") return token;
+
+    const rgb = token.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/);
+    if (rgb) {
+        const channels = rgb.slice(1, 4).map(Number);
+        if (channels.every((channel) => channel >= 0 && channel <= 255)) {
+            return "#" + channels.map((channel) => channel.toString(16).padStart(2, "0")).join("");
+        }
+        return token;
+    }
+
+    const hex = token.match(/^#([0-9a-f]{3,8})$/);
+    if (!hex) return token;
+    const digits = hex[1];
+    if (digits.length < 6) return "#" + digits.slice(0, 3).split("").map((c) => c + c).join("");
+    return "#" + digits.slice(0, 6);
+}
 
 function _segmentCount(path) {
     // Legacy stores a flat "M,39,0,L,0,2" string, Jumpgate a real [["M",x,y]] array,
@@ -450,27 +471,39 @@ function _segmentCount(path) {
 
 function buildSceneBarriers(campaign) {
     const pages = {};
-    const totals = { pages: 0, native: 0, colour: 0, single_colour: 0, none: 0, doors: 0, windows: 0 };
+    const totals = {
+        pages: 0, native: 0, colour: 0, single_colour: 0, none: 0,
+        doors: 0, windows: 0, native_residue_pages: 0, native_residue_segments: 0,
+    };
     for (const page of _array(campaign.pages)) {
         if (!page || page.id === undefined || page.id === null) continue;
         const wallPaths = _array(page.paths).filter((p) => p && p.layer === WALL_LAYER);
         const barrierTypes = {};
         const strokes = {};
+        const normalizedStrokes = {};
         for (const p of wallPaths) {
             const type = _text(p.barrierType) || "wall";
             barrierTypes[type] = (barrierTypes[type] || 0) + 1;
             // Only a plain barrier can carry a door colour; one-way and transparent
             // barriers are their own thing and the converter excludes them too.
-            if (type !== "wall") continue;
+            if (type !== WALL_BARRIER) continue;
             const stroke = _text(p.stroke);
-            strokes[stroke] = (strokes[stroke] || 0) + _segmentCount(p);
+            const count = _segmentCount(p);
+            strokes[stroke] = (strokes[stroke] || 0) + count;
+            const normalized = _normalizeStroke(stroke);
+            normalizedStrokes[normalized] = (normalizedStrokes[normalized] || 0) + count;
         }
         const doors = _array(page.doors).length;
         const windows = _array(page.windows).length;
-        const distinct = Object.keys(strokes).length;
+        const distinct = Object.keys(normalizedStrokes).length;
         const encoding = doors > 0 ? "native"
             : distinct > 1 ? "colour"
                 : distinct === 1 ? "single-colour" : "none";
+        const nativeResidue = doors > 0
+            ? Object.fromEntries(Object.entries(normalizedStrokes).filter(([stroke]) => stroke !== "#0000ff"))
+            : null;
+        const nativeResidueSegments = nativeResidue
+            ? Object.values(nativeResidue).reduce((sum, count) => sum + count, 0) : 0;
 
         pages[String(page.id)] = {
             name: _text(page.name),
@@ -479,6 +512,9 @@ function buildSceneBarriers(campaign) {
             wall_paths: wallPaths.length,
             barrier_types: barrierTypes,
             stroke_segments: strokes,
+            stroke_segments_normalized: normalizedStrokes,
+            stroke_scope: { layer: WALL_LAYER, barrierType: WALL_BARRIER },
+            native_colour_residue: nativeResidue,
             door_encoding: encoding,
             // Roll20's own UDL migration can delete the legacy layer outright, so a page
             // that once held colour-coded doors comes back with none. Flagged, never
@@ -489,6 +525,10 @@ function buildSceneBarriers(campaign) {
         totals[encoding.replace("-", "_")] += 1;
         totals.doors += doors;
         totals.windows += windows;
+        if (nativeResidueSegments > 0) {
+            totals.native_residue_pages += 1;
+            totals.native_residue_segments += nativeResidueSegments;
+        }
     }
     return { totals, pages };
 }

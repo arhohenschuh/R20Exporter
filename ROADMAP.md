@@ -104,6 +104,7 @@ keep the trackers distinct.
 | **R5** | **1.0.0** | **MVP1 — acceptance against the real converter** | No | **Delivered** 6 Aug 2026 |
 | **R6** | 1.1.0 | Structure & renderability — the folder oracle | One, declared | **Delivered** 14 Aug 2026 |
 | **R7** | 1.2.0 | Scene barriers — which encoding says "door" | No | **Delivered** 14 Aug 2026 |
+| **R8** | 1.3.0 | Normalized barrier evidence and native residue | No | **Delivered** 14 Aug 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering
@@ -447,6 +448,38 @@ Cassalanter Villa at `#0000ff`:247 / `#ff9900`:70 and Temple of Asmodeus at
 `#0000ff`:448 / `#ff9900`:85 — identical to the independent count. Across the
 archived exports, **11 of 22 campaigns carry no door objects at all** and `#ff9900`
 is the door colour in every campaign checked.
+
+---
+
+### R8 · 1.3.0 — Normalized barrier evidence and native residue
+
+The cross-model review that corrected R20Converter's unsafe frequency classifier found a
+second evidence problem: one colour can be serialized as `#0000ff` and
+`rgb(0, 0, 255)` on the **same page**. Raw strings split one structural colour into two
+ranks and fabricate native-page residue.
+
+`scene_barriers` therefore adds, without rewriting the source:
+
+- `stroke_segments_normalized` beside the raw `stroke_segments` provenance;
+- `stroke_scope: {layer: "walls", barrierType: "wall"}` so a consumer cannot repeat the
+  original assessor's defect of counting map/drawing paths as walls;
+- `native_colour_residue`, normalized non-blue counts on pages with native door objects;
+- fleet totals for pages/segments carrying native residue.
+
+CSS normalization covers `rgb()` / `rgba()`, case and shorthand hex while preserving the
+literal `transparent` sentinel. Encoding classification uses normalized counts; the
+exporter still does **not** decide which colour means door.
+
+**Gate:** Ravenloft Map 7-10 folds raw hex blue 226 + `rgb()` blue 96 into one blue 322,
+keeps genuine black 2 as residue, and reports no false **blue** residue · native
+orange/magenta residue remains machine-readable and totalled · raw tokens remain unchanged ·
+synthetic shorthand/uppercase/`rgba()` controls normalize · disabling normalization makes
+all three groups fail.
+
+**Gate result — measured 14 Aug 2026.** Offline suite **58/58**. The hash-pinned
+official-module baseline behind the consumer policy contains 18 archives / 314 walled
+pages; normalization removes eight false native-residue pages caused solely by Curse of
+Strahd's split blue tokens. `index.json` format `1.2` → `1.3`.
 
 ---
 

@@ -270,6 +270,8 @@ test("a page with door objects is recorded as the native encoding", () => {
     const p = scene_barriers.pages.hrak;
     assert.equal(p.door_encoding, "native");
     assert.equal(p.doors, 2);
+    assert.deepEqual(p.stroke_scope, { layer: "walls", barrierType: "wall" });
+    assert.deepEqual(p.native_colour_residue, {});
 });
 
 test("a page with no door objects and two wall colours is the legacy encoding", () => {
@@ -280,6 +282,49 @@ test("a page with no door objects and two wall colours is the legacy encoding", 
     assert.equal(p.door_encoding, "colour");
     assert.equal(p.doors, 0);
     assert.deepEqual(p.stroke_segments, { "#0000ff": 247, "#ff9900": 70 });
+    assert.deepEqual(p.stroke_segments_normalized, { "#0000ff": 247, "#ff9900": 70 });
+    assert.equal(p.native_colour_residue, null);
+});
+
+test("Ravenloft-style rgb and hex blue collapse to one colour with no false native residue", () => {
+    const { scene_barriers } = buildIndex(campaign({
+        pages: [page({
+            id: "raven", name: "Ravenloft Map 7-10", doors: [{ id: "d1" }, { id: "d2" }, { id: "d3" }],
+            paths: [wall("#0000ff", 224), wall("rgb(0, 0, 255)", 56)],
+        })],
+    }), { now: NOW });
+    const p = scene_barriers.pages.raven;
+    assert.deepEqual(p.stroke_segments, { "#0000ff": 224, "rgb(0, 0, 255)": 56 });
+    assert.deepEqual(p.stroke_segments_normalized, { "#0000ff": 280 });
+    assert.deepEqual(p.native_colour_residue, {});
+    assert.equal(scene_barriers.totals.native_residue_pages, 0);
+});
+
+test("native-page non-blue residue is machine-readable and totalled", () => {
+    const { scene_barriers } = buildIndex(campaign({
+        pages: [page({
+            id: "sea", name: "Seadeeps", doors: [{ id: "d1" }],
+            paths: [wall("#0000ff", 100), wall("rgb(255, 153, 0)", 12), wall("#ff00ff", 3)],
+        })],
+    }), { now: NOW });
+    const p = scene_barriers.pages.sea;
+    assert.deepEqual(p.native_colour_residue, { "#ff9900": 12, "#ff00ff": 3 });
+    assert.equal(scene_barriers.totals.native_residue_pages, 1);
+    assert.equal(scene_barriers.totals.native_residue_segments, 15);
+});
+
+test("synthetic CSS colour variants normalize without rewriting raw evidence", () => {
+    const { scene_barriers } = buildIndex(campaign({
+        pages: [page({ id: "css", paths: [
+            wall("#00f", 2), wall("#0000FF", 3), wall("rgb(0,0,255)", 4),
+            wall("rgba(255, 153, 0, 0.5)", 5), wall("transparent", 6),
+        ] })],
+    }), { now: NOW });
+    const p = scene_barriers.pages.css;
+    assert.equal(Object.keys(p.stroke_segments).length, 5, "raw provenance remains split");
+    assert.deepEqual(p.stroke_segments_normalized, {
+        "#0000ff": 9, "#ff9900": 5, transparent: 6,
+    });
 });
 
 test("one campaign can hold both encodings, and the totals say so", () => {

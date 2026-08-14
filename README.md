@@ -92,15 +92,27 @@ incompatible answers and only the export sees both:
 - **`native`** — the page carries real `doors` objects (Jumpgate / UDL).
 - **`colour`** — legacy dynamic lighting, which has **no door object at all**. A door
   is a wall-layer path drawn in a different `stroke`, a convention rather than a
-  field. `stroke_segments` gives the segment count per colour so the minority colour
-  is identifiable.
+  field.
 - **`single-colour`** / **`none`** — nothing to infer.
+
+The evidence is deliberately split:
+
+- `stroke_segments` preserves the exact raw Roll20 tokens.
+- `stroke_segments_normalized` folds equivalent CSS spellings (`rgb()` / `rgba()` /
+  shorthand hex / case) into lowercase six-digit hex; `transparent` remains a sentinel.
+- `stroke_scope` declares exactly what was counted: `layer: "walls"` and
+  `barrierType: "wall"`. One-way and transparent *barriers* are reported separately and
+  never enter the colour tally.
+- `native_colour_residue` records normalized non-blue wall colours on a page that also
+  carries native door objects. These are evidence for partially migrated pages, **not an
+  instruction to turn them into doors**.
 
 A consumer that guesses wrong either loses every door on a legacy page or invents
 doors on a modern one, and **one campaign can hold both encodings on different
 pages**. `udl_auto_converted` flags a page whose legacy layer Roll20 may already have
 deleted during its own migration — for those, an older export can be the only
-surviving copy of the door positions.
+surviving copy of the door positions. The exporter records facts and never assigns door
+semantics to a colour.
 
 # Automating an export
 

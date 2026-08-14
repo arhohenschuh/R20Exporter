@@ -3,8 +3,8 @@
 - **Status**: Accepted
 - **Date**: 2026-08-06
 - **Applies to**: 0.12.0 (R1) onward
-- **Amended**: 2026-08-14 (1.1.0) — folder structure, renderability, and one
-  declared exception to "never a transformed record"
+- **Amended**: 2026-08-14 (1.1.0–1.3.0) — folder structure, renderability,
+  barrier evidence, and one declared exception to "never a transformed record"
 
 ## Context
 
@@ -107,4 +107,24 @@ week believing it had fixed this.
 Each asset record therefore gains `renderable`, and the totals gain
 `not-renderable`. The file is not renamed and the bytes are not touched — the
 consumer is simply told. `export_report.json` moves to format `1.2`.
+
+## Amendment, 2026-08-14 (1.2.0 / 1.3.0)
+
+### Barrier evidence, never door semantics
+
+Roll20 represents doors as native objects on modern pages and as a wall-stroke
+colour convention on legacy pages. One campaign can contain both. `index.json`
+therefore records `scene_barriers` per page: native door/window counts, barrier
+types, raw stroke segment counts, the observed encoding, and
+`udl_auto_converted`. Format moves to `1.2`.
+
+The corrective review then proved raw CSS tokens are not comparable: one blue
+can appear as `#0000ff` and `rgb(0, 0, 255)` on the same page. Format `1.3` adds
+normalized counts, an explicit `{layer: "walls", barrierType: "wall"}` tally
+scope, and normalized native-page residue while retaining the raw counts as
+provenance.
+
+The exporter assigns no meaning to a colour. It records enough evidence for a
+consumer to make a deterministic, reviewable policy decision without rewriting
+the Roll20 payload.
 
