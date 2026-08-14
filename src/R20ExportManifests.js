@@ -20,11 +20,11 @@
 
 // Kept in step with manifest.json by tests/version.test.js. The page context
 // has no access to chrome.runtime, so the version cannot be read at runtime.
-const R20EXPORTER_VERSION = "1.0.1";
+const R20EXPORTER_VERSION = "1.1.0";
 
-const REPORT_FORMAT = "1.1";
+const REPORT_FORMAT = "1.2";
 const INTEGRITY_FORMAT = "1.0";
-const INDEX_FORMAT = "1.0";
+const INDEX_FORMAT = "1.1";
 
 const OUTCOME = {
     PENDING: "pending",
@@ -34,6 +34,23 @@ const OUTCOME = {
     FAILED: "failed",
     SKIPPED: "skipped",
 };
+
+// Foundry silently refuses to draw a path whose extension is not one of these
+// (CONST.IMAGE_FILE_EXTENSIONS / VIDEO_ / AUDIO_). We deliberately keep the name
+// the source URL advertises -- ADR-003, because the converter looks the member up
+// by it -- so the honest thing is to say so rather than rename the file.
+const RENDERABLE_EXTENSIONS = new Set([
+    "apng", "avif", "bmp", "gif", "jpeg", "jpg", "png", "svg", "tiff", "webp",
+    "m4v", "mp4", "ogv", "webm",
+    "aac", "flac", "m4a", "mid", "mp3", "ogg", "opus", "wav",
+]);
+
+function _isRenderablePath(path) {
+    const name = _text(path).split("/").pop();
+    const dot = name.lastIndexOf(".");
+    if (dot < 0) return false;
+    return RENDERABLE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
 
 function _array(value) {
     return Array.isArray(value) ? value : [];
@@ -61,6 +78,7 @@ class R20ExportReport {
         this.campaign = { id: null, title: null, release: null };
         this.characterSheet = { template: null, templates: [], source: "unavailable" };
         this.characterAttributes = { total: 0, loaded: 0, incomplete: [] };
+        this.folderOrphansAppended = {};
         this.assets = [];
         this.collections = {};
         this.collectionMismatches = [];
@@ -90,6 +108,7 @@ class R20ExportReport {
             bytes: null,
             sha256: null,
             content_type: null,
+            renderable: null,
             reason: null,
             status: null,
             attempts: [],
@@ -112,6 +131,7 @@ class R20ExportReport {
         record.sha256 = details.sha256 !== undefined ? details.sha256 : record.sha256;
         record.content_type = details.contentType !== undefined ? details.contentType : record.content_type;
         record.path = details.path !== undefined ? details.path : record.path;
+        record.renderable = _isRenderablePath(record.path);
         record.reason = null;
         record.status = null;
     }
@@ -138,10 +158,12 @@ class R20ExportReport {
             failed: 0,
             skipped: 0,
             pending: 0,
+            "not-renderable": 0,
             bytes: 0,
         };
         for (const asset of this.assets) {
             if (totals[asset.outcome] !== undefined) totals[asset.outcome] += 1;
+            if (asset.renderable === false) totals["not-renderable"] += 1;
             if (typeof asset.bytes === "number") totals.bytes += asset.bytes;
         }
         return totals;
@@ -176,6 +198,7 @@ class R20ExportReport {
             campaign: this.campaign,
             character_sheet: this.characterSheet,
             character_attributes: this.characterAttributes,
+            folder_orphans_appended: this.folderOrphansAppended,
             totals: this.totals,
             collections: this.collections,
             collection_mismatches: this.collectionMismatches,
@@ -371,11 +394,17 @@ const INDEX_SOURCES = [
 
 function buildIndex(campaign, options = {}) {
     const now = options.now || (() => new Date().toISOString());
+    const folders = buildFolderStructure(campaign);
     const entries = [];
     for (const source of INDEX_SOURCES) {
         for (const item of _array(campaign[source.collection])) {
             if (!item || item.id === undefined || item.id === null) continue;
-            entries.push([String(item.id), { type: source.type, name: _text(item[source.name]) }]);
+            const id = String(item.id);
+            entries.push([id, {
+                type: source.type,
+                name: _text(item[source.name]),
+                folder: folders.membership[id] !== undefined ? folders.membership[id] : null,
+            }]);
         }
     }
     entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
@@ -385,9 +414,66 @@ function buildIndex(campaign, options = {}) {
         R20Exporter_index_format: INDEX_FORMAT,
         generated_at: now(),
         count: entries.length,
+        folders: folders.trees,
         entries: index,
     };
 }
+
+// --- the folder structure ---------------------------------------------------
+
+// Preserving every document is not the same as preserving the campaign: a
+// consumer can rebuild all 5,108 journal entries into one flat list and every
+// count still matches. The tree is therefore recorded explicitly so downstream
+// can assert structure rather than totals.
+const FOLDER_SOURCES = [
+    { name: "journal", field: "journalfolder" },
+    { name: "jukebox", field: "jukeboxfolder" },
+];
+
+function _walkFolder(nodes, prefix, out) {
+    for (const entry of _array(nodes)) {
+        if (typeof entry === "string") {
+            out.membership[entry] = prefix;
+            if (prefix !== null) out.documents += 1;
+            else out.root_documents += 1;
+            continue;
+        }
+        if (!entry || typeof entry !== "object") continue;
+        const name = _text(entry.n);
+        const path = prefix === null ? name : prefix + "/" + name;
+        out.paths.push(path);
+        out.max_depth = Math.max(out.max_depth, path.split("/").length);
+        _walkFolder(entry.i, path, out);
+    }
+}
+
+function buildFolderStructure(campaign) {
+    const trees = {};
+    const membership = {};
+    for (const source of FOLDER_SOURCES) {
+        const out = { paths: [], membership: {}, documents: 0, root_documents: 0, max_depth: 0 };
+        _walkFolder(campaign[source.field], null, out);
+        // Roll20 permits two sibling folders with the same name, so a duplicate
+        // path is a real campaign shape, not a bug -- report it, do not collapse it.
+        const seen = new Set();
+        const duplicates = [];
+        for (const path of out.paths) {
+            if (seen.has(path)) duplicates.push(path);
+            seen.add(path);
+        }
+        trees[source.name] = {
+            folders: out.paths.length,
+            max_depth: out.max_depth,
+            documents_in_folders: out.documents,
+            documents_at_root: out.root_documents,
+            duplicate_paths: duplicates.sort(),
+            paths: out.paths.slice().sort(),
+        };
+        Object.assign(membership, out.membership);
+    }
+    return { trees, membership };
+}
+
 
 // --- the integrity manifest -------------------------------------------------
 
@@ -670,6 +756,7 @@ return {
     sameCollectionCounts,
     characterAttributeSummary,
     buildIndex,
+    buildFolderStructure,
     buildIntegrity,
     detectCharacterSheet,
     hostCandidates,

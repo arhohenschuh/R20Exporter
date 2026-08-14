@@ -102,6 +102,7 @@ keep the trackers distinct.
 | **R3** | 0.14.0 | Storage & scale — OPFS, modern zip.js, worker compression | No | **Delivered** 6 Aug 2026 |
 | **R4** | 0.15.0 | Robust character export + MV3 cleanup | No | **Delivered** 6 Aug 2026 |
 | **R5** | **1.0.0** | **MVP1 — acceptance against the real converter** | No | **Delivered** 6 Aug 2026 |
+| **R6** | 1.1.0 | Structure & renderability — the folder oracle | One, declared | **Delivered** 14 Aug 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering
@@ -361,6 +362,48 @@ exports convert clean.
 
 ---
 
+### R6 · 1.1.0 — Structure & renderability
+
+Added after 1.0.0 because two downstream failures showed the export was complete
+and honest about *documents* while saying nothing about two things that had
+already cost releases.
+
+- **The folder tree is an export artefact now.** 18 converted modules kept every
+  one of 5,108 journal entries and flattened all of them into one folder; every
+  count matched. `index.json` gains a per-document `folder` path and a
+  `folders` block (count, depth, documents placed vs at root, duplicate sibling
+  paths, the sorted path list) so downstream can assert *structure* instead of
+  totals. Format `1.0` → `1.1`.
+- **The orphan append is declared.** `_addOrphanedElementsToFolder` has always
+  rewritten `journalfolder`/`jukeboxfolder` by appending unfiled handouts, PDFs
+  and tracks to the root. It predates ADR-001 and it stays — an orphan is
+  otherwise never exported — but it is now counted into
+  `export_report.json.folder_orphans_appended`, because an undeclared edit to the
+  tree disqualifies the export as the oracle for whether the tree survived.
+- **`renderable` per asset.** The zip member deliberately keeps the URL's
+  extension (ADR-003), and 139 members across five archived exports are therefore
+  named `.svg&cb=5` or `.jfif` — names Foundry silently refuses to draw. The file
+  is not renamed; the record says so, and `totals["not-renderable"]` counts them.
+  Format `1.1` → `1.2`.
+
+*Deliberately excluded:* renaming the affected members. That is ADR-003's
+territory and would break the converter's lookup; the correct repair is on the
+consumer side, and landed as R20Converter 1.8.1.
+
+**Gate:** the folder block round-trips a nested fixture including an empty branch
+and two same-named siblings · a document at the root reports `folder: null` ·
+the renderable flag is false for `.svg&cb=5` and `.jfif` and true for `.webp` ·
+the whole offline suite stays green.
+
+**Gate result — measured 14 Aug 2026.** Offline suite **50/50**. Against the real
+archived *Storm over Savage Frontier* export: 68 journal folders, max depth 3,
+865 documents in folders, 59 at the root, 0 duplicate paths, deepest path
+`The Iron Fist - Khundrukar - Forge of Fury/Magic Items/Potions`; 1,151 ids
+indexed. The 139 non-renderable members were found by scanning every archived
+export ZIP, not by recall.
+
+---
+
 ## Post-MVP — deliberately after 1.0.0
 
 ### The oracle: per-character derived-value snapshot
@@ -386,6 +429,35 @@ failure mode the converter's verify tooling exists to avoid.
 **Until this ships, exporting the PC sheets as PDF remains mandatory** — they
 are the only per-character oracle, and they cannot be recovered once a campaign
 is gone.
+
+#### Level history is not recoverable, and the PDFs are why it matters
+
+Asked whether a PC's *level history* could be preserved, and measured on the
+archived *Storm over Savage Frontier* export rather than assumed:
+
+| Question | Answer |
+|---|---|
+| PCs in the export | 79 |
+| carrying any Charactermancer stage (`mancerdata`) | **4** |
+| recording more than one level | **0** |
+| above level 1 whose current level is recorded | **0** |
+| attributes carrying a per-level index | 18, all `lvl<N>_slots_total/expended` — spell slots |
+| chat messages mentioning a level-up | **0** of 2,635 |
+
+Roll20 stores **state, not a ledger**: `base_level`, `multiclass<N>_lvl` and a
+`mancerdata` blob that the Charactermancer *overwrites* rather than appends to.
+Its level-up stages are stored under a single `lp-` prefix, not one per level.
+So there is nothing to preserve — the export already carries everything Roll20
+knows, and that is the character's final composition plus, for four characters,
+their level-1 build choices.
+
+That is precisely why the per-level sheet PDFs are mandatory: downstream Gate C
+rebuilds each PC from level 1 through Foundry's `AdvancementManager`, and the
+PDFs are the only record of what was chosen at each level. A future exporter
+step could surface `mancerdata` as a readable `oracle/<character>.json` sidecar,
+but it would cover 4 of 79 characters and only level 1 — worth doing alongside
+the derived-value oracle, not worth doing alone, and never worth presenting as
+"level history".
 
 ### Also deferred
 

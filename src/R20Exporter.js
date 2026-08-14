@@ -664,9 +664,11 @@ class R20Exporter {
         result.jukeboxfolder = result.jukeboxfolder != "" ? JSON.parse(result.jukeboxfolder) : []
         result.journalfolder = result.journalfolder != "" ? JSON.parse(result.journalfolder) : []
         result.turnorder = result.turnorder != "" ? JSON.parse(result.turnorder) : []
-        this._addOrphanedElementsToFolder(result.jukeboxfolder, result.jukebox)
-        this._addOrphanedElementsToFolder(result.journalfolder, result.handouts)
-        this._addOrphanedElementsToFolder(result.journalfolder, result.pdfs)
+        this.report.folderOrphansAppended = {
+            jukebox: this._addOrphanedElementsToFolder(result.jukeboxfolder, result.jukebox),
+            journal_handouts: this._addOrphanedElementsToFolder(result.journalfolder, result.handouts),
+            journal_pdfs: this._addOrphanedElementsToFolder(result.journalfolder, result.pdfs),
+        }
         // Counted from the live page, not from what we produced: a collection we
         // never enumerated would otherwise report a happy 0.
         this._live_counts = liveCollectionCounts(window)
@@ -1038,12 +1040,20 @@ class R20Exporter {
         }
         return _list
     }
+    // The one place a Roll20-sourced field is rewritten: a handout in no folder is
+    // invisible to the journal walk, so it is appended to the root. Counted into the
+    // report because an undeclared edit to the tree makes the export useless as the
+    // oracle for "did the folder structure survive".
     _addOrphanedElementsToFolder(folder, elements) {
         const all_ids = this._flattenFolderEntries(folder)
+        let appended = 0
         for (let element of elements) {
-            if (!all_ids.includes(element.id))
+            if (!all_ids.includes(element.id)) {
                 folder.push(element.id)
+                appended += 1
+            }
         }
+        return appended
     }
 
     _makeAddBlobToZip(folder, filename, finallyCB, record = null, details = null) {

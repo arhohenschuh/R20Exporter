@@ -37,13 +37,25 @@ The one file to read when something looks wrong.
 
 - `totals` — how many assets were referenced, and how they ended:
   `bundled`, `bundled-lower-res`, `canvas-reencoded`, `failed`, `skipped`,
-  `pending`. **If `failed` is 0, nothing is missing.**
+  `pending`. **If `failed` is 0, nothing is missing.** `not-renderable` counts
+  separately — see below.
 - `assets[]` — one entry per referenced asset: where it landed in the zip
   (`path`), the URL the campaign referenced (`url`), the URL that actually
   answered (`served_from`), which resolution was stored (`variant`), the
   `sha256` and byte count of the stored bytes, and `attempts[]` — every host and
   resolution tried, with its HTTP status. A `failed` entry always carries a
   `reason`.
+- `renderable` — whether the stored **name** is one Foundry VTT will draw. The
+  zip member deliberately keeps the extension the Roll20 URL advertised, so an
+  asset can be present, correct and byte-perfect while being named
+  `….svg&cb=5` or `….jfif`, which Foundry silently refuses to render. The file
+  is never renamed; the flag exists so a consumer can normalise it. A bundled
+  asset with `renderable: false` is not a failed download.
+- `folder_orphans_appended` — handouts, PDFs and jukebox tracks that belonged to
+  no folder and were appended to the root of `journalfolder` / `jukeboxfolder`.
+  This is the one Roll20-sourced field the exporter rewrites — an orphan would
+  otherwise never be exported at all — so it is counted rather than hidden.
+  Subtract it before comparing root document counts against Roll20.
 - `collections` — what the export contains next to what the live campaign held,
   per collection. They should be equal; `collection_mismatches` lists any that
   are not.
@@ -59,10 +71,20 @@ whose character was deleted, folder entries and journal links pointing at things
 that no longer exist, chat messages with unusable roll payloads, and pages that
 exported empty while still having a thumbnail.
 
-### `index.json` — every Roll20 id to `{type, name}`
+### `index.json` — every Roll20 id to `{type, name, folder}`
 
 So a downstream tool can resolve a `journal.roll20.net/handout/<id>` link by
 lookup instead of guessing by name.
+
+`folder` is the document's `"/"`-joined folder path, or `null` at the root, and
+`folders` describes the tree itself per collection — how many folders, how deep,
+how many documents sit in folders versus at the root, any duplicate sibling
+paths, and the sorted list of every path.
+
+That block exists because preserving documents is not the same as preserving the
+campaign: a consumer can import every one of thousands of journal entries into a
+single flat folder and every count will still match. Compare `folders.journal`
+after conversion, not the entry count.
 
 # Automating an export
 

@@ -209,6 +209,65 @@ test("the index maps every linkable id to its type and name", () => {
     assert.deepEqual(Object.keys(index.entries), Object.keys(index.entries).slice().sort());
 });
 
+// Downstream flattened 5,108 journal entries into one folder and every count still
+// matched, so the tree itself has to be recorded, not just the documents in it.
+const NESTED = [
+    { n: "Part 1", i: ["h1", { n: "Handouts", i: ["h2"] }] },
+    { n: "Part 2", i: [] },
+    "c1",
+];
+
+test("the index records the folder path of every document", () => {
+    const index = buildIndex(campaign({
+        journalfolder: NESTED,
+        handouts: [{ id: "h1", name: "Rumours" }, { id: "h2", name: "Map" }],
+    }), { now: NOW });
+    assert.equal(index.entries.h1.folder, "Part 1");
+    assert.equal(index.entries.h2.folder, "Part 1/Handouts");
+    assert.equal(index.entries.c1.folder, null, "a document at the root has no folder");
+    assert.equal(index.entries.p1.folder, null, "pages have no Roll20 folders at all");
+});
+
+test("the index records the shape of the folder tree, not just its contents", () => {
+    const { folders } = buildIndex(campaign({
+        journalfolder: NESTED,
+        handouts: [{ id: "h1", name: "Rumours" }, { id: "h2", name: "Map" }],
+    }), { now: NOW });
+    assert.deepEqual(folders.journal.paths, ["Part 1", "Part 1/Handouts", "Part 2"]);
+    assert.equal(folders.journal.folders, 3);
+    assert.equal(folders.journal.max_depth, 2);
+    assert.equal(folders.journal.documents_in_folders, 2);
+    assert.equal(folders.journal.documents_at_root, 1);
+    assert.equal(folders.journal.duplicate_paths.length, 0);
+    assert.equal(folders.journal.folders, 3, "an empty branch is still a folder");
+});
+
+test("two sibling folders sharing a name are reported, not collapsed", () => {
+    const { folders } = buildIndex(campaign({
+        journalfolder: [{ n: "Maps", i: ["h1"] }, { n: "Maps", i: [] }],
+    }), { now: NOW });
+    assert.equal(folders.journal.folders, 2);
+    assert.deepEqual(folders.journal.duplicate_paths, ["Maps"]);
+});
+
+test("a stored name Foundry cannot draw is flagged rather than renamed", () => {
+    const report = new R20ExportReport({ now: NOW });
+    // The exporter keeps the URL's extension on purpose (ADR-003) -- 139 such
+    // members exist across the archived exports -- so it has to say so.
+    const bad = report.beginAsset("https://files.d20.io/images/a/original.svg&cb=5", "pages/1/graphics/a");
+    report.succeeded(bad, { path: "pages/1/graphics/a.svg&cb=5", bytes: 1 });
+    const jfif = report.beginAsset("https://files.d20.io/images/b/med.jfif", "pages/1/graphics/b");
+    report.succeeded(jfif, { path: "pages/1/graphics/b.jfif", bytes: 1 });
+    const fine = report.beginAsset("https://files.d20.io/images/c/original.webp", "pages/1/graphics/c");
+    report.succeeded(fine, { path: "pages/1/graphics/c.webp", bytes: 1 });
+
+    assert.equal(bad.renderable, false);
+    assert.equal(jfif.renderable, false);
+    assert.equal(fine.renderable, true);
+    assert.equal(report.totals["not-renderable"], 2);
+    assert.equal(report.toJSON().assets.find((a) => a.path.endsWith(".webp")).renderable, true);
+});
+
 test("the character sheet template is recorded, or honestly reported as unknown", () => {
     assert.deepEqual(detectCharacterSheet(campaign(), { CharacterSheetsManagerSingleton: { sheets: { ogl5e: {} } } }), {
         template: "ogl5e",
