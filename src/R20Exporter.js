@@ -1407,6 +1407,7 @@ class R20Exporter {
         const id = this.newPendingOperation("Writing export manifests")
         try {
             this.report.characterSheet = detectCharacterSheet(this.campaign, window)
+            this.report.characterSheets = detectCharacterSheets(this.campaign)
             this.report.characterAttributes = characterAttributeSummary(this.campaign)
             this.report.setCollectionCounts(exportedCollectionCounts(this.campaign), this._live_counts)
             this._addFileToZip(this.zip, "export_report.json", this.jsonToBlob(this.report.toJSON()))

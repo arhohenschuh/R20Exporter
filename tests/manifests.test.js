@@ -14,6 +14,7 @@ const {
     compareCollectionCounts,
     checkEngineGlobals,
     countChatMessages,
+    detectCharacterSheets,
 } = require("../src/R20ExportManifests.js");
 
 const NOW = () => "1980-01-01T00:00:00.000Z";
@@ -396,4 +397,46 @@ test("the character sheet template is recorded, or honestly reported as unknown"
         { template: "Shaped_5e", templates: ["Shaped_5e"], source: "character-attribute:character_sheet" }
     );
     assert.deepEqual(detectCharacterSheet(campaign()), { template: null, templates: [], source: "unavailable" });
+});
+
+test("mixed campaigns record one honest sheet identity per character", () => {
+    const rows = detectCharacterSheets(campaign({ characters: [
+        { id: "ogl", name: "Legacy", charactersheetname: "ogl5e", attributes: [] },
+        { id: "attribute", name: "Shaped", attributes: [
+            { name: "character_sheet", current: "Shaped_5e" },
+        ] },
+        { id: "conflict", name: "Conflict", charactersheetname: "ogl5e", attributes: [
+            { name: "character_sheet", current: "dnd2024byroll20" },
+        ] },
+        { id: "missing", name: "Unknown", attributes: [] },
+    ] }));
+
+    assert.deepEqual(rows, [
+        {
+            id: "attribute", name: "Shaped", template: "Shaped_5e",
+            templates: ["Shaped_5e"], source: "character-attribute:character_sheet",
+            state: "available", character_sheet_attribute: "Shaped_5e",
+            character_sheet_attributes: ["Shaped_5e"], charactersheetname: null,
+        },
+        {
+            id: "conflict", name: "Conflict", template: null,
+            templates: ["dnd2024byroll20", "ogl5e"],
+            source: "conflicting-character-fields", state: "ambiguous",
+            character_sheet_attribute: "dnd2024byroll20",
+            character_sheet_attributes: ["dnd2024byroll20"],
+            charactersheetname: "ogl5e",
+        },
+        {
+            id: "missing", name: "Unknown", template: null, templates: [],
+            source: "unavailable", state: "unavailable",
+            character_sheet_attribute: null, character_sheet_attributes: [],
+            charactersheetname: null,
+        },
+        {
+            id: "ogl", name: "Legacy", template: "ogl5e", templates: ["ogl5e"],
+            source: "character.charactersheetname", state: "available",
+            character_sheet_attribute: null, character_sheet_attributes: [],
+            charactersheetname: "ogl5e",
+        },
+    ]);
 });

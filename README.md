@@ -59,8 +59,12 @@ The one file to read when something looks wrong.
 - `collections` — what the export contains next to what the live campaign held,
   per collection. They should be equal; `collection_mismatches` lists any that
   are not.
-- `character_sheet` — which sheet template the campaign uses, and where that was
-  read from. How every `attribs` field must be interpreted depends on it.
+- `character_sheet` — the backward-compatible campaign-level sheet summary and
+  where it was read from.
+- `character_sheets` — one row per character, including ID, name, all observed
+  template values, exact `charactersheetname` / `character_sheet` evidence, its
+  source, and an explicit `available`, `ambiguous`, or `unavailable` state. This
+  is authoritative for mixed-sheet campaigns.
 - `character_attributes` — characters whose sheet never finished loading, and so
   exported without attributes.
 

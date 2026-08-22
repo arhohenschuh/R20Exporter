@@ -105,6 +105,7 @@ keep the trackers distinct.
 | **R6** | 1.1.0 | Structure & renderability — the folder oracle | One, declared | **Delivered** 14 Aug 2026 |
 | **R7** | 1.2.0 | Scene barriers — which encoding says "door" | No | **Delivered** 14 Aug 2026 |
 | **R8** | 1.3.0 | Normalized barrier evidence and native residue | No | **Delivered** 14 Aug 2026 |
+| **R9** | 1.3.1 | Per-character sheet identity for mixed campaigns | No | **Delivered** 22 Aug 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering
@@ -483,6 +484,22 @@ Strahd's split blue tokens. `index.json` format `1.2` → `1.3`.
 
 ---
 
+### R9 · 1.3.1 — Per-character sheet identity
+
+The campaign-level `character_sheet` summary cannot identify which parser belongs to which
+character when several templates coexist. Report format 1.3 therefore adds a deterministic
+`character_sheets` array with one row per character: ID, name, resolved template, all observed
+templates, exact direct/attribute evidence, source, and explicit available/ambiguous/unavailable
+state. The existing campaign summary remains backward-compatible and no Roll20-sourced field is
+rewritten (B008).
+
+**Gate result — measured 22 Aug 2026.** Offline suite **59/59**. The mixed-sheet fixture covers
+direct `charactersheetname`, exact `character_sheet` attribute, disagreement, and unavailable
+states. The retained *Curse of Strahd* export contains 181 character records: 168 `ogl5e` and 13
+`dnd2024byroll20`, while its old singular campaign summary selects `dnd2024byroll20`.
+
+---
+
 ## Post-MVP — deliberately after 1.0.0
 
 ### The oracle: per-character derived-value snapshot
@@ -539,6 +556,15 @@ the derived-value oracle, not worth doing alone, and never worth presenting as
 "level history".
 
 ### Also deferred
+
+- **Versioned default filenames** — suggest
+  `<campaign>_R20Export-<exporter-version>.zip` for an export whose caller did not supply a name.
+  Explicit caller filenames remain untouched.
+- **Decoded asset dimensions** — record image width and height beside variant, bytes, SHA-256,
+  and content type after successful decoding. Non-image or undecodable content records dimensions
+  as unavailable; source URLs and bytes remain untouched.
+- **Per-character derived-value oracle** — continue the plan above for AC, HP, attacks, damage,
+  and save DCs, with per-value provenance and explicit unavailable states.
 
 - **Firefox support** — OPFS now exists there, so the historical storage blocker
   is gone, but a second review/test pipeline isn't justified until Chrome is

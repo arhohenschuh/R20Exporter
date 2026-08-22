@@ -64,6 +64,21 @@ test("report counts match the live campaign, and the sheet template is recorded"
     assert.equal(report.collections.graphics.exported, 4);
     assert.equal(report.collections.graphics.live, 4);
     assert.equal(report.character_sheet.template, "OGL_2.0");
+    assert.deepEqual(report.character_sheets, [
+        {
+            id: "-CHARACTERALIVE", name: "Sir Braford", template: null,
+            templates: [], source: "unavailable", state: "unavailable",
+            character_sheet_attribute: null, character_sheet_attributes: [],
+            charactersheetname: null,
+        },
+        {
+            id: "char-alive", name: "Erky Timbers", template: "OGL_2.0",
+            templates: ["OGL_2.0"], source: "character-attribute:character_sheet",
+            state: "available", character_sheet_attribute: "OGL_2.0",
+            character_sheet_attributes: ["OGL_2.0"], charactersheetname: null,
+        },
+    ]);
+    assert.equal(report.R20Exporter_report_format, "1.3");
     assert.equal(report.campaign.release, "jumpgate");
 });
 

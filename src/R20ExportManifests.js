@@ -20,9 +20,9 @@
 
 // Kept in step with manifest.json by tests/version.test.js. The page context
 // has no access to chrome.runtime, so the version cannot be read at runtime.
-const R20EXPORTER_VERSION = "1.3.0";
+const R20EXPORTER_VERSION = "1.3.1";
 
-const REPORT_FORMAT = "1.2";
+const REPORT_FORMAT = "1.3";
 const INTEGRITY_FORMAT = "1.0";
 const INDEX_FORMAT = "1.3";
 
@@ -77,6 +77,7 @@ class R20ExportReport {
         this.now = options.now || (() => new Date().toISOString());
         this.campaign = { id: null, title: null, release: null };
         this.characterSheet = { template: null, templates: [], source: "unavailable" };
+        this.characterSheets = [];
         this.characterAttributes = { total: 0, loaded: 0, incomplete: [] };
         this.folderOrphansAppended = {};
         this.assets = [];
@@ -197,6 +198,7 @@ class R20ExportReport {
             generated_at: this.now(),
             campaign: this.campaign,
             character_sheet: this.characterSheet,
+            character_sheets: this.characterSheets,
             character_attributes: this.characterAttributes,
             folder_orphans_appended: this.folderOrphansAppended,
             totals: this.totals,
@@ -792,6 +794,54 @@ function detectCharacterSheet(campaign, scope) {
     return { template: null, templates: [], source: "unavailable" };
 }
 
+function detectCharacterSheets(campaign) {
+    return _array(campaign && campaign.characters).map((character) => {
+        const direct = _text(character && character.charactersheetname);
+        const attributeValues = _array(character && (character.attributes || character.attribs))
+            .filter((attribute) => attribute && attribute.name === "character_sheet")
+            .map((attribute) => _text(attribute.current))
+            .filter((value) => value.trim() !== "");
+        const distinctAttributes = [...new Set(attributeValues)].sort();
+        const templates = [...new Set(
+            (direct.trim() !== "" ? [direct] : []).concat(distinctAttributes)
+        )].sort();
+
+        let template = null;
+        let source = "unavailable";
+        let state = "unavailable";
+        if (templates.length === 1) {
+            template = templates[0];
+            state = "available";
+            if (direct.trim() !== "" && distinctAttributes.length) {
+                source = "character.charactersheetname+character-attribute:character_sheet";
+            } else if (direct.trim() !== "") {
+                source = "character.charactersheetname";
+            } else {
+                source = "character-attribute:character_sheet";
+            }
+        } else if (templates.length > 1) {
+            source = "conflicting-character-fields";
+            state = "ambiguous";
+        }
+
+        return {
+            id: _text(character && character.id),
+            name: _text(character && character.name),
+            template: template,
+            templates: templates,
+            source: source,
+            state: state,
+            charactersheetname: direct.trim() !== "" ? direct : null,
+            character_sheet_attribute: distinctAttributes.length === 1
+                ? distinctAttributes[0] : null,
+            character_sheet_attributes: distinctAttributes,
+        };
+    }).sort((left, right) => {
+        if (left.id !== right.id) return left.id < right.id ? -1 : 1;
+        return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+    });
+}
+
 // --- asset candidates -------------------------------------------------------
 
 const ROLL20_BUCKETS = ["files.d20.io", "files.staging.d20.io"];
@@ -873,6 +923,7 @@ return {
     buildSceneBarriers,
     buildIntegrity,
     detectCharacterSheet,
+    detectCharacterSheets,
     hostCandidates,
     assetCandidates,
     resolutionOf,
