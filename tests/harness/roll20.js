@@ -138,6 +138,9 @@ function createPage(options = {}) {
         unescape: global.unescape,
         Blob,
         File,
+        createImageBitmap: Object.prototype.hasOwnProperty.call(options, "createImageBitmap")
+            ? options.createImageBitmap
+            : (async () => ({ width: 1, height: 1, close() {} })),
         FileReader: class {
             readAsText(blob) {
                 blob.text().then((text) => {

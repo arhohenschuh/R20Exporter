@@ -106,6 +106,7 @@ keep the trackers distinct.
 | **R7** | 1.2.0 | Scene barriers — which encoding says "door" | No | **Delivered** 14 Aug 2026 |
 | **R8** | 1.3.0 | Normalized barrier evidence and native residue | No | **Delivered** 14 Aug 2026 |
 | **R9** | 1.3.1 | Per-character sheet identity for mixed campaigns | No | **Delivered** 22 Aug 2026 |
+| **R10** | 1.3.2 | Decode-validate image bodies before bundling | No | **Delivered** 24 Aug 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering
@@ -497,6 +498,23 @@ rewritten (B008).
 direct `charactersheetname`, exact `character_sheet` attribute, disagreement, and unavailable
 states. The retained *Curse of Strahd* export contains 181 character records: 168 `ogl5e` and 13
 `dnd2024byroll20`, while its old singular campaign summary selects `dnd2024byroll20`.
+
+---
+
+### R10 · 1.3.2 — Decode-valid image intake
+
+HTTP 200, a non-zero length, and a stable SHA-256 prove that bytes arrived; they do not prove those
+bytes are an image. Every Roll20 image candidate is now decoded with `createImageBitmap()` before
+ZIP insertion. A rejected body remains visible on its HTTP attempt and the existing host/resolution
+ladder continues; no candidate succeeds until it decodes with positive dimensions (B009).
+
+**Gate result — measured 24 Aug 2026.** Offline suite **63/63**. The negative fixture rejects all
+three host spellings of a malformed original and recovers a valid `max` candidate. Its terminal
+control makes every candidate malformed and requires a failed report row with no ZIP member. A
+JPEG-shaped control omits EOI and remains red under a deliberately lenient decoder. The immutable
+*Dead in Thay* source independently proves the old failure: two 8,724,480-byte JPEG
+members share SHA-256 `66084483...922F`, lack JPEG EOI, fail Pillow decode, and were both reported
+as successfully bundled from HTTP 200.
 
 ---
 

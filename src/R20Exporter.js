@@ -961,7 +961,16 @@ class R20Exporter {
 
         const candidate = candidates[0]
         const next = () => this.downloadR20Resource(folder, prefix, url, finallyCB, candidates.slice(1), use_canvas, record)
-        const store = (blob) => this._storeAsset(folder, prefix, url, blob, candidate, record, finallyCB, use_canvas)
+        const store = (blob) => {
+            const validationId = this.newPendingOperation("Validating image " + candidate.url)
+            this._validateImageBlob(blob)
+                .then(() => this._storeAsset(folder, prefix, url, blob, candidate, record, finallyCB, use_canvas))
+                .catch((error) => {
+                    this.report.rejectedAttempt(record, candidate.url, error.message || String(error))
+                    next()
+                })
+                .finally(() => this.completedOperation(validationId))
+        }
 
         if (use_canvas) {
             this.downloadImageViaCanvas(candidate.url, store, () => {
@@ -975,6 +984,43 @@ class R20Exporter {
             const backoff = candidates.length > 1 ? NO_RETRY_BACKOFF : 10
             this.downloadResource(candidate.url, store, next, undefined, backoff, record)
         }
+    }
+
+    _validateImageBlob(blob) {
+        if (!blob || blob.size === 0) {
+            return Promise.reject(new Error("image decode failed: the response body is empty"))
+        }
+        if (typeof window.createImageBitmap !== "function") {
+            return Promise.reject(new Error("image decode failed: createImageBitmap is unavailable"))
+        }
+        return Promise.all([
+            blob.slice(0, 2).arrayBuffer(),
+            blob.slice(Math.max(0, blob.size - 65536)).arrayBuffer(),
+        ])
+            .then(([headBuffer, tailBuffer]) => {
+                const head = new Uint8Array(headBuffer)
+                if (head.length < 2 || head[0] !== 0xFF || head[1] !== 0xD8) return
+                const tail = new Uint8Array(tailBuffer)
+                for (let index = tail.length - 2; index >= 0; index--) {
+                    if (tail[index] === 0xFF && tail[index + 1] === 0xD9) return
+                }
+                throw new Error("the JPEG EOI marker is missing")
+            })
+            .then(() => window.createImageBitmap(blob))
+            .then((bitmap) => {
+                try {
+                    if (!bitmap || bitmap.width < 1 || bitmap.height < 1) {
+                        throw new Error("the decoded image has zero dimensions")
+                    }
+                } finally {
+                    if (bitmap && typeof bitmap.close === "function") bitmap.close()
+                }
+            })
+            .catch((error) => {
+                const reason = error && error.message ? error.message : String(error)
+                if (reason.startsWith("image decode failed:")) throw error
+                throw new Error("image decode failed: " + reason)
+            })
     }
 
     _extensionOf(url) {

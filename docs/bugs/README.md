@@ -19,3 +19,4 @@ behaviour only exists inside Roll20's page, a recorded fixture in
 | [B006](B006-empty-export-before-campaign-loads.md) | An export started before the campaign loads silently produces an empty archive | Fixed 0.15.0 |
 | [B007](B007-cors-candidate-retried.md) | A CORS-blocked candidate is retried with backoff, multiplying dead time | Fixed 1.0.0 |
 | [B008](B008-campaign-sheet-template-misrepresents-mixed-campaigns.md) | One campaign-level sheet template misrepresents mixed-sheet characters | Fixed 1.3.1 |
+| [B009](B009-malformed-http-200-images-reported-bundled.md) | Malformed HTTP 200 images are reported as successfully bundled | Fixed 1.3.2 |

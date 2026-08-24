@@ -4,14 +4,56 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { hostCandidates, assetCandidates, resolutionOf } = require("../src/R20ExportManifests.js");
-const { runZipExport } = require("./harness/roll20.js");
+const { createExporter, runZipExport } = require("./harness/roll20.js");
 const { buildCampaign, buildRoutes, LEGACY_ONLY_ASSET, LEGACY_HOST, DEAD_ASSET } = require("./fixtures/campaign.js");
 
-async function exportFixture() {
+const MALFORMED_ASSET = "https://files.d20.io/images/map/med.png?5";
+
+async function exportFixture(overrides = {}) {
     const { Campaign, Jukebox } = buildCampaign();
-    const page = await runZipExport({ campaign: Campaign, jukebox: Jukebox, routes: buildRoutes(), title: "Sunless Citadel" });
+    const page = await runZipExport(Object.assign({
+        campaign: Campaign,
+        jukebox: Jukebox,
+        routes: buildRoutes(),
+        title: "Sunless Citadel",
+    }, overrides));
     page.stop();
     return page.contents;
+}
+
+function malformedMapRoutes({ recover = true } = {}) {
+    const fallback = buildRoutes();
+    return (url) => {
+        const direct = url
+            .replace("https://s3.amazonaws.com/files.d20.io/", "https://files.d20.io/")
+            .replace("https://files.staging.d20.io/", "https://files.d20.io/");
+        if (!direct.includes("/images/map/")) return fallback(url);
+        if (recover && direct.includes("/max.")) {
+            return { body: "valid-image", type: "image/jpeg" };
+        }
+        return { body: "malformed-image", type: "image/jpeg" };
+    };
+}
+
+function truncatedJpegRoutes() {
+    const fallback = buildRoutes();
+    return (url) => {
+        const direct = url
+            .replace("https://s3.amazonaws.com/files.d20.io/", "https://files.d20.io/")
+            .replace("https://files.staging.d20.io/", "https://files.d20.io/");
+        if (!direct.includes("/images/map/")) return fallback(url);
+        if (direct.includes("/max.")) {
+            return { body: Buffer.from([0xFF, 0xD8, 0xFF, 0xD9]), type: "image/jpeg" };
+        }
+        return { body: Buffer.from([0xFF, 0xD8, 0x00, 0x01, 0x02]), type: "image/jpeg" };
+    };
+}
+
+async function rejectMalformedImage(blob) {
+    if (await blob.text() === "malformed-image") {
+        throw new Error("InvalidStateError: the image source is malformed");
+    }
+    return { width: 1, height: 1, close() {} };
 }
 
 test("a Roll20 asset is spelled for every known CDN host, renamed host first", () => {
@@ -94,4 +136,63 @@ test("a dead asset records every candidate it tried before giving up", async () 
     assert.equal(tried.size, 12, "all four resolutions on all three hosts must be tried");
     assert.ok([...tried].some((u) => u.includes("s3.amazonaws.com")), "the legacy host must be among them");
     assert.ok([...tried].some((u) => u.includes("/original.")), "the original resolution must be among them");
+});
+
+test("a malformed HTTP 200 image falls through to a decodable lower resolution", async () => {
+    const contents = await exportFixture({
+        routes: malformedMapRoutes(),
+        createImageBitmap: rejectMalformedImage,
+    });
+    const report = JSON.parse(contents["export_report.json"]);
+    const asset = report.assets.find((row) => row.url === MALFORMED_ASSET);
+
+    assert.equal(asset.outcome, "bundled-lower-res");
+    assert.equal(asset.variant, "max");
+    assert.equal(contents[asset.path], "valid-image");
+    const rejected = asset.attempts.filter((attempt) => attempt.error && attempt.error.includes("image decode failed"));
+    assert.equal(rejected.length, 3, "all three host spellings of the malformed original must be rejected");
+});
+
+test("an image with no decodable candidate is failed and omitted from the zip", async () => {
+    const contents = await exportFixture({
+        routes: malformedMapRoutes({ recover: false }),
+        createImageBitmap: rejectMalformedImage,
+    });
+    const report = JSON.parse(contents["export_report.json"]);
+    const asset = report.assets.find((row) => row.url === MALFORMED_ASSET);
+
+    assert.equal(asset.outcome, "failed");
+    assert.match(asset.reason, /decode|canvas/i);
+    assert.equal(contents[asset.path], undefined, "malformed bytes must never enter the zip");
+    assert.ok(asset.attempts.some((attempt) => attempt.error && attempt.error.includes("image decode failed")));
+});
+
+test("a JPEG missing EOI is rejected even when the browser decoder is lenient", async () => {
+    const contents = await exportFixture({ routes: truncatedJpegRoutes() });
+    const report = JSON.parse(contents["export_report.json"]);
+    const asset = report.assets.find((row) => row.url === MALFORMED_ASSET);
+
+    assert.equal(asset.outcome, "bundled-lower-res");
+    assert.equal(asset.variant, "max");
+    assert.equal(
+        asset.attempts.filter((attempt) => attempt.error && attempt.error.includes("JPEG EOI marker")).length,
+        3
+    );
+});
+
+test("image validation fails closed when the browser decoder is unavailable", async () => {
+    const { Campaign, Jukebox } = buildCampaign();
+    const page = createExporter({
+        campaign: Campaign,
+        jukebox: Jukebox,
+        routes: buildRoutes(),
+        title: "Sunless Citadel",
+        createImageBitmap: undefined,
+    });
+
+    await assert.rejects(
+        page.exporter._validateImageBlob(new page.sandbox.Blob(["image"], { type: "image/png" })),
+        /createImageBitmap is unavailable/
+    );
+    page.stop();
 });

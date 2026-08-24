@@ -20,7 +20,7 @@
 
 // Kept in step with manifest.json by tests/version.test.js. The page context
 // has no access to chrome.runtime, so the version cannot be read at runtime.
-const R20EXPORTER_VERSION = "1.3.1";
+const R20EXPORTER_VERSION = "1.3.2";
 
 const REPORT_FORMAT = "1.3";
 const INTEGRITY_FORMAT = "1.0";
@@ -121,6 +121,18 @@ class R20ExportReport {
     attempted(record, url, status = null, error = null) {
         if (!record) return;
         record.attempts.push({ url: _text(url), status: status, error: error ? String(error) : null });
+    }
+
+    rejectedAttempt(record, url, error) {
+        if (!record) return;
+        for (let index = record.attempts.length - 1; index >= 0; index--) {
+            const attempt = record.attempts[index];
+            if (attempt.url === _text(url) && !attempt.error) {
+                attempt.error = String(error);
+                return;
+            }
+        }
+        this.attempted(record, url, 200, error);
     }
 
     succeeded(record, details = {}) {
