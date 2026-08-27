@@ -108,6 +108,7 @@ keep the trackers distinct.
 | **R9** | 1.3.1 | Per-character sheet identity for mixed campaigns | No | **Delivered** 22 Aug 2026 |
 | **R10** | 1.3.2 | Decode-validate image bodies before bundling | No | **Delivered** 24 Aug 2026 |
 | **R11** | 1.4.0 | Export Jumpgate Map Pins with closure evidence | No | **Delivered** 27 Aug 2026 |
+| **R12** | 1.4.1 | Await live `mapPins` initialization before Pin gates | No | **Delivered** 27 Aug 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering
@@ -538,6 +539,31 @@ parity, source disclosure, reference closure, and per-page index counts.
 Negative controls remove the Pin collection and referenced Pin independently;
 both must refuse the export.
 An archived Pin-only page must wake on Pin arrival, and a failed Pin image must remain visible in the asset report.
+
+---
+
+### R12 · 1.4.1 — Live Map Pin initialization
+
+The real Jumpgate page model exposes Pins as `page.mapPins`, but only after
+`fullyLoadPage()` creates the collection and its separate
+`initializationPromise` resolves. Version 1.4.0 checked every page before that
+lifecycle completed and therefore refused a valid current DotMM campaign as if
+the Pin collection did not exist (B011).
+
+The engine guard now validates stable campaign primitives without demanding
+uninitialized page collections. After archived pages load, the exporter waits
+for every page's discovered Pin collection and its initialization promise before
+building Pin closure or serializing pages. Pin-only archived pages wake through
+the shared collection discovery path rather than the obsolete `thepins` name.
+
+**Gate result - measured 27 Aug 2026: 73/73 tests pass.** The live-shaped
+regression uses `page.mapPins`, creates it only during `fullyLoadPage()`, delays
+its Pin until `initializationPromise` resolves, and requires the resulting ZIP
+to contain that Pin. Playwright independently measured the current DotMM game:
+29 pages, 1,620 Pins on 26 pages, 1,620 Handout references, and zero missing,
+page-mismatched, or Handout-mismatched references. Playwright then injected the
+exact 16-file built runtime into that page and independently returned version
+1.4.1, source `pages.mapPins`, and closure 1,620/1,620 PASS.
 
 ---
 

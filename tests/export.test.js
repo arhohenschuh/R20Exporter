@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { runZipExport, createExporter, waitFor } = require("./harness/roll20.js");
-const { buildCampaign, buildRoutes, DEAD_ASSET } = require("./fixtures/campaign.js");
+const { buildCampaign, buildRoutes, DEAD_ASSET, collection, model } = require("./fixtures/campaign.js");
 const { diffExports } = require("../tools/diff-exports.js");
 
 function exportOptions(overrides = {}) {
@@ -128,8 +128,12 @@ test("a Jumpgate export refuses to run when the Pin collection is unavailable", 
     const { Campaign, Jukebox } = buildCampaign();
     for (const page of Campaign.pages.models) delete page.thepins;
     const page = createExporter(exportOptions({ campaign: Campaign, jukebox: Jukebox }));
+    page.exporter.pinInitializationTimeout = 50;
     await page.exporter.exportCampaignZip();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitFor(() => page.exporter.console.closeShown, {
+        label: "the unavailable Pin collection refusal",
+        timeout: 5000,
+    });
     assert.equal(page.recorder.saved.length, 0);
     assert.equal(page.exporter.zip, null);
     assert.equal(page.exporter.console.closeShown, true);
@@ -157,22 +161,76 @@ test("an archived page wakes as soon as its Pin-only content arrives", async () 
     const { Campaign, Jukebox } = buildCampaign();
     const archived = Campaign.pages.models[0];
     const pin = archived.thepins.models[0];
+    archived.mapPins = archived.thepins;
+    delete archived.thepins;
     archived.fullyLoaded = false;
     archived.thegraphics = { models: [], length: 0, toJSON: () => [] };
     archived.thetexts = { models: [], length: 0, toJSON: () => [] };
     archived.thepaths = { models: [], length: 0, toJSON: () => [] };
-    archived.thepins = { models: [], length: 0, toJSON() { return this.models.map((model) => model.toJSON()); } };
+    archived.mapPins = { models: [], length: 0, toJSON() { return this.models.map((model) => model.toJSON()); } };
     archived.doors = { models: [], length: 0, toJSON: () => [] };
     archived.windows = { models: [], length: 0, toJSON: () => [] };
     archived.fullyLoadPage = () => setTimeout(() => {
-        archived.thepins.models.push(pin);
-        archived.thepins.length = 1;
+        archived.mapPins.models.push(pin);
+        archived.mapPins.length = 1;
         archived.fullyLoaded = true;
     }, 100);
 
     const page = await runZipExport(exportOptions({ campaign: Campaign, jukebox: Jukebox }));
     const campaign = JSON.parse(page.contents["campaign.json"]);
     assert.equal(campaign.pages.find((item) => item.id === "page-1").pins.length, 1);
+    page.stop();
+});
+
+test("an archived Jumpgate page awaits its real mapPins initializationPromise", async () => {
+    const { Campaign, Jukebox } = buildCampaign();
+    const loaded = Campaign.pages.models[0];
+    loaded.mapPins = loaded.thepins;
+    delete loaded.thepins;
+
+    const archived = Campaign.pages.models[1];
+    delete archived.thepins;
+    archived.fullyLoaded = false;
+    archived.thetexts = collection([model({ id: "text-2", text: "Loading marker" })]);
+    const pin = model({
+        id: "pin-2",
+        x: 70,
+        y: 140,
+        link: "handout-2",
+        linkType: "handout",
+        subLink: "2. Vault",
+        subLinkType: "headerGM",
+        useTextIcon: true,
+        iconText: "2",
+        visibleTo: "",
+    });
+    const handout = model({
+        id: "handout-2",
+        name: "Vault",
+        avatar: "",
+        inplayerjournals: "",
+        controlledby: "",
+        pins: JSON.stringify([{
+            id: "pin-2", page: "page-2", subLink: "2. Vault", subLinkType: "headerGM",
+        }]),
+        notes: "",
+        gmnotes: "",
+    });
+    Campaign.handouts = collection([...Campaign.handouts.models, handout]);
+    archived.fullyLoadPage = () => {
+        archived.fullyLoaded = true;
+        archived.mapPins = collection([]);
+        archived.mapPins.initializationPromise = new Promise((resolve) => setTimeout(() => {
+            archived.mapPins.models.push(pin);
+            archived.mapPins.length = 1;
+            resolve();
+        }, 1500));
+    };
+
+    const page = await runZipExport(exportOptions({ campaign: Campaign, jukebox: Jukebox }));
+    const campaign = JSON.parse(page.contents["campaign.json"]);
+    assert.equal(campaign.pages.find((item) => item.id === "page-2").pins[0].id, "pin-2");
+    assert.equal(JSON.parse(page.contents["export_report.json"]).pin_source, "pages.mapPins");
     page.stop();
 });
 

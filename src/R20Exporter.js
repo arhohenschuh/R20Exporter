@@ -728,6 +728,45 @@ class R20Exporter {
         return model.attribsHaveArrived;
     }
 
+    _awaitPagePinCollection(page, timeout = this.pinInitializationTimeout || 30000) {
+        const deadline = Date.now() + timeout
+        return new Promise((resolve, reject) => {
+            const check = () => {
+                const state = pagePinCollection(page)
+                if (!state) {
+                    if (Date.now() >= deadline) {
+                        reject(new Error("Map Pin collection did not initialize for page " + page.id))
+                    } else {
+                        setTimeout(check, 100)
+                    }
+                    return
+                }
+                const initialization = state.collection && state.collection.initializationPromise
+                if (!initialization || typeof initialization.then !== "function") {
+                    resolve(state)
+                    return
+                }
+                const remaining = Math.max(1, deadline - Date.now())
+                let timer = null
+                Promise.race([
+                    Promise.resolve(initialization),
+                    new Promise((_, fail) => {
+                        timer = setTimeout(() => fail(new Error(
+                            "Map Pin collection timed out for page " + page.id
+                        )), remaining)
+                    }),
+                ]).then(() => {
+                    clearTimeout(timer)
+                    resolve(pagePinCollection(page))
+                }, (error) => {
+                    clearTimeout(timer)
+                    reject(error)
+                })
+            }
+            check()
+        })
+    }
+
     async parseCampaign(cb) {
         // .all()/.count() are Roll20 page extensions to Array.prototype, not
         // standard JS; depending on them is one more unversioned page API.
@@ -771,7 +810,7 @@ class R20Exporter {
                 timeout -= 100
                 if (timeout == 0 || loading_page.thegraphics.length > 0 || 
                     loading_page.thetexts.length > 0 || loading_page.thepaths.length > 0 ||
-                    (loading_page.thepins && loading_page.thepins.length > 0) ||
+                    ((pagePinCollection(loading_page) || {}).data || []).length > 0 ||
                     (loading_page.doors && loading_page.doors.length > 0) ||
                     (loading_page.windows && loading_page.windows.length > 0))
                     setTimeout(() => this.parseCampaign(cb), 1000)
@@ -779,6 +818,17 @@ class R20Exporter {
                     setTimeout(check_page, 100)
             }
             return setTimeout(check_page, 100)
+        }
+
+        if (Campaign.toJSON().release === "jumpgate") {
+            try {
+                await Promise.all(Campaign.pages.models.map((page) => this._awaitPagePinCollection(page)))
+            } catch (error) {
+                this.console.error("<strong>Roll20 Map Pins did not finish loading.</strong>")
+                this.console.error(error && error.message ? error.message : String(error))
+                this.console.showClose()
+                return
+            }
         }
 
 

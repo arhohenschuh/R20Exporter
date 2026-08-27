@@ -20,7 +20,7 @@
 
 // Kept in step with manifest.json by tests/version.test.js. The page context
 // has no access to chrome.runtime, so the version cannot be read at runtime.
-const R20EXPORTER_VERSION = "1.4.0";
+const R20EXPORTER_VERSION = "1.4.1";
 
 const REPORT_FORMAT = "1.4";
 const INTEGRITY_FORMAT = "1.0";
@@ -69,7 +69,7 @@ function _get(scope, path) {
     return current;
 }
 
-const PIN_COLLECTION_NAMES = ["thepins", "pins", "mapPins", "mappins"];
+const PIN_COLLECTION_NAMES = ["mapPins", "thepins", "pins", "mappins"];
 const PIN_FIELDS = [
     "_id", "_type", "_pageid", "id", "type", "page", "pageId", "pageid",
     "x", "y", "bgColor", "shape", "icon", "pinImage", "customizationType",
@@ -145,16 +145,20 @@ function _findPinCollection(owner) {
     if (!owner || typeof owner !== "object") return null;
     for (const name of PIN_COLLECTION_NAMES) {
         const data = _collectionData(owner[name]);
-        if (data !== null) return { source: name, data: data };
+        if (data !== null) return { source: name, data: data, collection: owner[name] };
     }
     for (const name of Object.keys(owner).sort()) {
         if (PIN_COLLECTION_NAMES.includes(name)) continue;
         const data = _collectionData(owner[name]);
         if (data && data.length > 0 && data.every(_looksLikePin)) {
-            return { source: name, data: data };
+            return { source: name, data: data, collection: owner[name] };
         }
     }
     return null;
+}
+
+function pagePinCollection(page) {
+    return _findPinCollection(page);
 }
 
 function _pageId(page) {
@@ -654,19 +658,6 @@ function checkEngineGlobals(scope) {
         for (const requirement of ENGINE_READINESS) {
             if (!requirement.test(_get(scope, requirement.path))) {
                 loading.push({ path: requirement.path, why: requirement.why });
-            }
-        }
-        let release = null;
-        try {
-            release = _get(scope, "Campaign").toJSON().release;
-        } catch (err) { /* the Campaign requirement reports this separately */ }
-        if (release === "jumpgate") {
-            const pinState = livePinState(scope);
-            if (!pinState.available) {
-                missing.push({
-                    path: "Campaign.pages.models[*].thepins",
-                    why: "Map Pins",
-                });
             }
         }
     }
@@ -1296,6 +1287,7 @@ return {
     countChatMessages,
     checkEngineGlobals,
     livePinState,
+    pagePinCollection,
     handoutPinReferences,
     pinReferenceClosure,
     sameCollectionCounts,
