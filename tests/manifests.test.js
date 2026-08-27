@@ -8,11 +8,14 @@ const {
     OUTCOME,
     buildIndex,
     buildIntegrity,
+    buildScenePins,
     detectCharacterSheet,
     exportedCollectionCounts,
     liveCollectionCounts,
     compareCollectionCounts,
     checkEngineGlobals,
+    livePinState,
+    pinReferenceClosure,
     countChatMessages,
     detectCharacterSheets,
 } = require("../src/R20ExportManifests.js");
@@ -94,8 +97,34 @@ test("a collection the page does not expose counts as null, never as zero", () =
     assert.equal(counts.characters, 2);
     assert.equal(counts.graphics, 3);
     assert.equal(counts.macros, 2);
+    assert.equal(counts.pins, null);
+    assert.equal(counts.pin_references, 0);
     assert.equal(counts.pdfs, null);
     assert.equal(counts.jukebox, null);
+});
+
+test("Pin discovery reuses an inferred private collection name on empty pages", () => {
+    const full = {
+        id: "p1",
+        privatePinCollection: {
+            models: [{ id: "pin-1", x: 10, y: 20, iconText: "1" }],
+            toJSON() { return this.models; },
+        },
+        toJSON: () => ({ id: "p1" }),
+    };
+    const empty = {
+        id: "p2",
+        privatePinCollection: {
+            models: [],
+            toJSON() { return this.models; },
+        },
+        toJSON: () => ({ id: "p2" }),
+    };
+    const state = livePinState({ Campaign: { pages: { models: [full, empty] } } });
+    assert.equal(state.available, true);
+    assert.equal(state.source, "pages.privatePinCollection");
+    assert.equal(state.pins.length, 1);
+    assert.deepEqual(state.byPage.p2, []);
 });
 
 test("the engine guard fails loudly on a page it does not understand", () => {
@@ -198,6 +227,59 @@ test("integrity flags an unusable roll payload without repairing it", () => {
     assert.equal(manifest.totals["unusable-chat-roll"], 2);
     assert.equal(countChatMessages(archive), 4);
     assert.equal(archive[0].bad.content, "", "the manifest must not touch the payload");
+});
+
+test("integrity reports a Handout reference whose Map Pin is absent", () => {
+    const manifest = buildIntegrity(campaign({
+        handouts: [{
+            id: "h1", name: "Entrance", notes: "", gmnotes: "",
+            pins: JSON.stringify([{ id: "missing-pin", page: "p1" }]),
+        }],
+    }), { now: NOW });
+    assert.equal(manifest.totals["dangling-handout-pin-reference"], 1);
+    assert.equal(
+        manifest.findings.find((finding) => finding.kind === "dangling-handout-pin-reference").pin_id,
+        "missing-pin"
+    );
+});
+
+test("Pin closure rejects duplicate IDs and mismatched Handout anchors", () => {
+    const closure = pinReferenceClosure(
+        [{
+            id: "h1",
+            pins: JSON.stringify([{
+                id: "pin-1", page: "p1", subLink: "1. Entrance", subLinkType: "headerGM",
+            }]),
+        }],
+        {
+            p1: [
+                {
+                    id: "pin-1", x: 10, y: 20, link: "missing-handout", linkType: "handout",
+                    subLink: "2. Hall", subLinkType: "headerGM",
+                },
+                { id: "pin-1", x: 30, y: 40 },
+            ],
+        }
+    );
+    assert.equal(closure.pass, false);
+    assert.deepEqual(closure.duplicatePinIds, ["pin-1"]);
+    assert.equal(closure.danglingPinLinks.length, 1);
+    assert.equal(closure.linkMismatches.length, 1);
+    assert.equal(closure.subLinkMismatches.length, 1);
+});
+
+test("the scene Pin index records visibility, links, labels, and custom images", () => {
+    const summary = buildScenePins(campaign({ pages: [page({
+        id: "p1",
+        pins: [
+            { id: "hidden", x: 1, y: 2, link: "h1", subLink: "1. Entry", useTextIcon: true, iconText: "1" },
+            { id: "visible", x: 3, y: 4, visibleTo: "all", customizationType: "image", pinImage: "https://example/pin.png" },
+        ],
+    })] }));
+    assert.deepEqual(summary.totals, {
+        pages: 1, pages_with_pins: 1, pins: 2, hidden: 1, visible: 1,
+        linked: 1, anchors: 1, text_labels: 1, custom_images: 1,
+    });
 });
 
 test("the index maps every linkable id to its type and name", () => {

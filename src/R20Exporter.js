@@ -336,12 +336,13 @@ class R20Exporter {
         return result
     }
 
-    parsePage(page) {
+    parsePage(page, pinsByPage = {}) {
         let data = page.toJSON()
         data.zorder = data.zorder.split(",")
         data.graphics = page.thegraphics ? page.thegraphics.toJSON() : []
         data.texts = page.thetexts ? page.thetexts.toJSON() : []
         data.paths = page.thepaths ? page.thepaths.toJSON() : []
+        data.pins = pinsByPage[String(data.id || page.id)] || []
         data.doors = page.doors ? page.doors.toJSON() : []
         data.windows = page.windows ? page.windows.toJSON() : []
         for (let path of data.paths) {
@@ -355,18 +356,18 @@ class R20Exporter {
         return data
     }
 
-    parsePages(pages) {
+    parsePages(pages, pinsByPage = {}) {
         let array = []
         for (let page of pages.models) {
             if (page.fullyLoaded) {
-                array.push(this.parsePage(page))
+                array.push(this.parsePage(page, pinsByPage))
             } else {
                 // Archived pages are not loaded. We can tell them to load but we have
                 // no callbacks on when that is done, so we need to wait before parsing them.
                 const id = this.newPendingOperation("Parse page " + page.name);
                 const makeCB = (a, i, p) => {
                     return () => {
-                        a.push(this.parsePage(p))
+                        a.push(this.parsePage(p, pinsByPage))
                         this.completedOperation(i)
                     }
                 }
@@ -644,6 +645,27 @@ class R20Exporter {
     }
 
     _parseCampaignDelayed(result, cb) {
+        const pinState = livePinState(window)
+        if (result.release === "jumpgate" && !pinState.available) {
+            this.console.error("<strong>Roll20 Map Pins are unavailable.</strong>")
+            this.console.error("Affected pages or Pins: " + pinState.missingPages.join(", "))
+            this.console.showClose()
+            return
+        }
+        const sourceHandouts = Campaign.handouts.models.map((handout) => handout.toJSON())
+        const pinClosure = pinReferenceClosure(sourceHandouts, pinState.byPage)
+        if (!pinClosure.pass) {
+            this.console.error("<strong>Roll20 Map Pin reference closure failed.</strong>")
+            this.console.error(JSON.stringify(pinClosure))
+            this.console.showClose()
+            return
+        }
+        this.report.pinSource = pinState.source
+        this.report.pinClosure = {
+            pass: pinClosure.pass,
+            pins: pinClosure.pinCount,
+            references: pinClosure.referenceCount,
+        }
         const done = () => {
             if (cb)
                 cb(result)
@@ -655,7 +677,7 @@ class R20Exporter {
         result.handouts = this.parseHandouts(Campaign.handouts, done)
         result.pdfs = Campaign.pdfs ? this.parsePDFs(Campaign.pdfs, done) : []
         result.characters = this.parseCharacters(Campaign.characters, done)
-        result.pages = this.parsePages(Campaign.pages)
+        result.pages = this.parsePages(Campaign.pages, pinState.byPage)
         result.players = this.parsePlayers(Campaign.players)
         result.macros = this.parseMacros(Campaign.players)
         result.decks = Campaign.decks ? this.parseDecks(Campaign.decks) : []
@@ -749,6 +771,7 @@ class R20Exporter {
                 timeout -= 100
                 if (timeout == 0 || loading_page.thegraphics.length > 0 || 
                     loading_page.thetexts.length > 0 || loading_page.thepaths.length > 0 ||
+                    (loading_page.thepins && loading_page.thepins.length > 0) ||
                     (loading_page.doors && loading_page.doors.length > 0) ||
                     (loading_page.windows && loading_page.windows.length > 0))
                     setTimeout(() => this.parseCampaign(cb), 1000)
@@ -1305,6 +1328,18 @@ class R20Exporter {
                 if (graphic.sides) {
                     for (let [i, side] of graphic.sides.entries())
                         this.downloadR20Resource(graphics, graphic.id + "_side_" + i, side, finallyCB)
+                }
+            }
+        }
+        const pinsWithImages = (page.pins || []).filter((pin) => pin.pinImage || pin.tooltipImage)
+        if (pinsWithImages.length > 0) {
+            const pins = this._addZipFolder(folder, "pins")
+            for (const pin of pinsWithImages) {
+                if (pin.pinImage) {
+                    this.downloadR20Resource(pins, pin.id + "_pin", pin.pinImage, finallyCB)
+                }
+                if (pin.tooltipImage) {
+                    this.downloadR20Resource(pins, pin.id + "_tooltip", pin.tooltipImage, finallyCB)
                 }
             }
         }

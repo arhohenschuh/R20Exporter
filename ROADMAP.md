@@ -107,6 +107,7 @@ keep the trackers distinct.
 | **R8** | 1.3.0 | Normalized barrier evidence and native residue | No | **Delivered** 14 Aug 2026 |
 | **R9** | 1.3.1 | Per-character sheet identity for mixed campaigns | No | **Delivered** 22 Aug 2026 |
 | **R10** | 1.3.2 | Decode-validate image bodies before bundling | No | **Delivered** 24 Aug 2026 |
+| **R11** | 1.4.0 | Export Jumpgate Map Pins with closure evidence | No | **Delivered** 27 Aug 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering
@@ -515,6 +516,28 @@ JPEG-shaped control omits EOI and remains red under a deliberately lenient decod
 *Dead in Thay* source independently proves the old failure: two 8,724,480-byte JPEG
 members share SHA-256 `66084483...922F`, lack JPEG EOI, fail Pillow decode, and were both reported
 as successfully bundled from HTTP 200.
+
+---
+
+### R11 · 1.4.0 — Jumpgate Map Pin conservation
+
+Jumpgate Map Pins are layerless `_type: "pin"` objects, not page graphics. The
+exporter now discovers Roll20's live Pin collection, stores complete Pin records
+in each page's `pins[]`, bundles custom Pin and tooltip images, and includes Pins
+in stable-load and live/export collection counts. Handout Pin back-references
+must resolve to a unique Pin on the same page before an export can proceed.
+
+Report format 1.4 records `pin_source` and `pin_closure`. Index format 1.4 adds
+per-page `scene_pins` counts. `integrity.json` reports malformed references,
+duplicate or invalid Pins, missing Pin objects, page disagreement, and dangling
+Handout links without rewriting source data (B010).
+
+**Gate result - measured 27 Aug 2026: 72/72 tests pass.** The fixture contains a hidden text Pin linked to a GM-note heading and
+requires exact payload preservation, bundled tooltip artwork, live/export Pin
+parity, source disclosure, reference closure, and per-page index counts.
+Negative controls remove the Pin collection and referenced Pin independently;
+both must refuse the export.
+An archived Pin-only page must wake on Pin arrival, and a failed Pin image must remain visible in the asset report.
 
 ---
 

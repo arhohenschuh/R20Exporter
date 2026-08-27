@@ -78,8 +78,120 @@ test("report counts match the live campaign, and the sheet template is recorded"
             character_sheet_attributes: ["OGL_2.0"], charactersheetname: null,
         },
     ]);
-    assert.equal(report.R20Exporter_report_format, "1.3");
+    assert.equal(report.R20Exporter_report_format, "1.4");
     assert.equal(report.campaign.release, "jumpgate");
+});
+
+test("a referenced Map Pin keeps its complete page payload and parity count", async () => {
+    const { contents } = await exportOnce();
+    const campaign = JSON.parse(contents["campaign.json"]);
+    const pin = campaign.pages[0].pins[0];
+    assert.deepEqual(pin, {
+        id: "pin-1",
+        x: 350,
+        y: 420,
+        bgColor: "#242424",
+        shape: "teardrop",
+        icon: "base-dot",
+        pinImage: "/images/pin-marker.png",
+        customizationType: "icon",
+        useTextIcon: true,
+        iconText: "1",
+        link: "handout-1",
+        linkType: "handout",
+        subLink: "1. Entrance",
+        subLinkType: "headerGM",
+        title: "1. Entrance",
+        notes: "",
+        gmNotes: "The old stairs descend into darkness.",
+        tooltipImage: "https://files.d20.io/images/pin-tooltip/med.png?9",
+        visibleTo: "",
+        tooltipVisibleTo: "",
+        scale: 1,
+    });
+    const report = JSON.parse(contents["export_report.json"]);
+    assert.equal(report.collections.pins.exported, 1);
+    assert.equal(report.collections.pins.live, 1);
+    assert.equal(report.collections.pin_references.exported, 1);
+    assert.equal(report.collections.pin_references.live, 1);
+    assert.equal(report.pin_source, "pages.thepins");
+    assert.deepEqual(report.pin_closure, { pass: true, pins: 1, references: 1 });
+    assert.ok(Object.keys(contents).some((name) => /\/pins\/pin-1_pin\.png$/.test(name)));
+    assert.ok(Object.keys(contents).some((name) => /\/pins\/pin-1_tooltip\.png$/.test(name)));
+    const index = JSON.parse(contents["index.json"]);
+    assert.equal(index.scene_pins.totals.pins, 1);
+    assert.equal(index.scene_pins.totals.anchors, 1);
+    assert.equal(index.scene_pins.totals.text_labels, 1);
+});
+
+test("a Jumpgate export refuses to run when the Pin collection is unavailable", async () => {
+    const { Campaign, Jukebox } = buildCampaign();
+    for (const page of Campaign.pages.models) delete page.thepins;
+    const page = createExporter(exportOptions({ campaign: Campaign, jukebox: Jukebox }));
+    await page.exporter.exportCampaignZip();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(page.recorder.saved.length, 0);
+    assert.equal(page.exporter.zip, null);
+    assert.equal(page.exporter.console.closeShown, true);
+    page.stop();
+});
+
+test("a Jumpgate export refuses a Handout reference whose Pin is absent", async () => {
+    const { Campaign, Jukebox } = buildCampaign();
+    const pins = Campaign.pages.models[0].thepins;
+    pins.models.length = 0;
+    pins.length = 0;
+    const page = createExporter(exportOptions({ campaign: Campaign, jukebox: Jukebox }));
+    await page.exporter.exportCampaignZip();
+    await waitFor(() => page.exporter.console.closeShown, {
+        label: "the Pin closure refusal",
+        timeout: 5000,
+    });
+    assert.equal(page.recorder.saved.length, 0);
+    assert.equal(page.exporter.zip, null);
+    assert.equal(page.exporter.console.closeShown, true);
+    page.stop();
+});
+
+test("an archived page wakes as soon as its Pin-only content arrives", async () => {
+    const { Campaign, Jukebox } = buildCampaign();
+    const archived = Campaign.pages.models[0];
+    const pin = archived.thepins.models[0];
+    archived.fullyLoaded = false;
+    archived.thegraphics = { models: [], length: 0, toJSON: () => [] };
+    archived.thetexts = { models: [], length: 0, toJSON: () => [] };
+    archived.thepaths = { models: [], length: 0, toJSON: () => [] };
+    archived.thepins = { models: [], length: 0, toJSON() { return this.models.map((model) => model.toJSON()); } };
+    archived.doors = { models: [], length: 0, toJSON: () => [] };
+    archived.windows = { models: [], length: 0, toJSON: () => [] };
+    archived.fullyLoadPage = () => setTimeout(() => {
+        archived.thepins.models.push(pin);
+        archived.thepins.length = 1;
+        archived.fullyLoaded = true;
+    }, 100);
+
+    const page = await runZipExport(exportOptions({ campaign: Campaign, jukebox: Jukebox }));
+    const campaign = JSON.parse(page.contents["campaign.json"]);
+    assert.equal(campaign.pages.find((item) => item.id === "page-1").pins.length, 1);
+    page.stop();
+});
+
+test("a failed Pin image remains visible in the asset report", async () => {
+    const { Campaign, Jukebox } = buildCampaign();
+    const source = Campaign.pages.models[0].thepins.models[0].toJSON();
+    source.pinImage = DEAD_ASSET;
+    Campaign.pages.models[0].thepins = {
+        models: [source],
+        length: 1,
+        toJSON() { return JSON.parse(JSON.stringify(this.models)); },
+    };
+    const { contents } = await exportOnce({ campaign: Campaign, jukebox: Jukebox });
+    const report = JSON.parse(contents["export_report.json"]);
+    const failed = report.assets.filter((asset) => /\/pins\/pin-1_pin/.test(asset.path));
+    assert.equal(failed.length, 1);
+    assert.equal(failed[0].outcome, "failed");
+    assert.ok(failed[0].reason);
+    assert.equal(Object.keys(contents).some((name) => /\/pins\/pin-1_pin\./.test(name)), false);
 });
 
 test("a collection the exporter never enumerated is caught, not reported as complete", async () => {

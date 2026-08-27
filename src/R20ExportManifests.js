@@ -20,11 +20,11 @@
 
 // Kept in step with manifest.json by tests/version.test.js. The page context
 // has no access to chrome.runtime, so the version cannot be read at runtime.
-const R20EXPORTER_VERSION = "1.3.2";
+const R20EXPORTER_VERSION = "1.4.0";
 
-const REPORT_FORMAT = "1.3";
+const REPORT_FORMAT = "1.4";
 const INTEGRITY_FORMAT = "1.0";
-const INDEX_FORMAT = "1.3";
+const INDEX_FORMAT = "1.4";
 
 const OUTCOME = {
     PENDING: "pending",
@@ -69,6 +69,287 @@ function _get(scope, path) {
     return current;
 }
 
+const PIN_COLLECTION_NAMES = ["thepins", "pins", "mapPins", "mappins"];
+const PIN_FIELDS = [
+    "_id", "_type", "_pageid", "id", "type", "page", "pageId", "pageid",
+    "x", "y", "bgColor", "shape", "icon", "pinImage", "customizationType",
+    "useTextIcon", "iconText", "tooltipImage", "tooltipImageSize", "link",
+    "linkType", "subLink", "subLinkType", "title", "notes", "gmNotes",
+    "visibleTo", "autoNotesType", "tooltipVisibleTo", "tooltipTitleVisibleTo",
+    "nameplateVisibleTo", "imageVisibleTo", "notesVisibleTo", "gmNotesVisibleTo",
+    "scale", "imageDesynced", "notesDesynced", "gmNotesDesynced",
+];
+
+function _modelData(model) {
+    if (!model) return null;
+    let data = null;
+    try {
+        if (typeof model.toJSON === "function") data = model.toJSON();
+        else if (model.attributes && typeof model.attributes === "object") data = model.attributes;
+        else if (typeof model === "object" && typeof model.get !== "function") data = model;
+        else if (typeof model.get === "function") {
+            data = {};
+            for (const field of PIN_FIELDS) {
+                const value = model.get(field);
+                if (value !== undefined) data[field] = value;
+            }
+        }
+    } catch (err) {
+        return null;
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+    if (typeof model.get === "function") {
+        for (const field of PIN_FIELDS) {
+            if (data[field] !== undefined) continue;
+            try {
+                const value = model.get(field);
+                if (value !== undefined) data[field] = value;
+            } catch (err) { /* preserve the fields the model did expose */ }
+        }
+    }
+    data = JSON.parse(JSON.stringify(data));
+    const id = data.id !== undefined ? data.id
+        : data._id !== undefined ? data._id : model.id;
+    if (id !== undefined && id !== null && data.id === undefined) data.id = String(id);
+    return data;
+}
+
+function _collectionData(collection) {
+    if (!collection) return null;
+    try {
+        if (typeof collection.toJSON === "function") {
+            const data = collection.toJSON();
+            return Array.isArray(data) ? data.map(_modelData).filter(Boolean) : null;
+        }
+        if (Array.isArray(collection.models)) {
+            return collection.models.map(_modelData).filter(Boolean);
+        }
+        if (Array.isArray(collection)) return collection.map(_modelData).filter(Boolean);
+    } catch (err) {
+        return null;
+    }
+    return null;
+}
+
+function _looksLikePin(data) {
+    if (!data) return false;
+    if (_text(data._type || data.type).toLowerCase() === "pin") return true;
+    const hasPosition = Number.isFinite(Number(data.x)) && Number.isFinite(Number(data.y));
+    const hasPinField = [
+        "iconText", "customizationType", "pinImage", "tooltipVisibleTo", "visibleTo",
+    ].some((field) => Object.prototype.hasOwnProperty.call(data, field));
+    return hasPosition && hasPinField;
+}
+
+function _findPinCollection(owner) {
+    if (!owner || typeof owner !== "object") return null;
+    for (const name of PIN_COLLECTION_NAMES) {
+        const data = _collectionData(owner[name]);
+        if (data !== null) return { source: name, data: data };
+    }
+    for (const name of Object.keys(owner).sort()) {
+        if (PIN_COLLECTION_NAMES.includes(name)) continue;
+        const data = _collectionData(owner[name]);
+        if (data && data.length > 0 && data.every(_looksLikePin)) {
+            return { source: name, data: data };
+        }
+    }
+    return null;
+}
+
+function _pageId(page) {
+    if (!page) return "";
+    const data = _modelData(page) || {};
+    return _text(data.id || data._id || page.id);
+}
+
+function _pinPageId(pin) {
+    return _text(pin && (pin.page || pin.pageId || pin.pageid || pin._pageid));
+}
+
+function _apiPinCollection(scope) {
+    for (const [name, collect] of [
+        ["getAllObjs", () => scope.getAllObjs()],
+        ["findObjs", () => scope.findObjs({ _type: "pin" })],
+    ]) {
+        if (typeof scope[name] !== "function") continue;
+        try {
+            const values = collect();
+            if (!Array.isArray(values)) continue;
+            const data = values.map(_modelData).filter(_looksLikePin);
+            return { source: name, data: data };
+        } catch (err) { /* try the next supported access path */ }
+    }
+    return null;
+}
+
+function livePinState(scope) {
+    const pages = _get(scope, "Campaign.pages.models");
+    if (!Array.isArray(pages)) {
+        return { available: false, source: null, pins: [], byPage: {}, missingPages: [] };
+    }
+
+    const byPage = {};
+    const pageSources = [];
+    const missingPages = [];
+    for (const page of pages) {
+        const id = _pageId(page);
+        const collection = _findPinCollection(page);
+        if (!collection) {
+            missingPages.push(id);
+            continue;
+        }
+        byPage[id] = collection.data;
+        pageSources.push(collection.source);
+    }
+    if (missingPages.length > 0 && pageSources.length > 0) {
+        const inferredSources = [...new Set(pageSources)].sort();
+        for (const page of pages) {
+            const id = _pageId(page);
+            if (!missingPages.includes(id)) continue;
+            for (const source of inferredSources) {
+                const data = _collectionData(page[source]);
+                if (data === null) continue;
+                byPage[id] = data;
+                missingPages.splice(missingPages.indexOf(id), 1);
+                break;
+            }
+        }
+    }
+    if (missingPages.length === 0) {
+        return {
+            available: true,
+            source: "pages." + [...new Set(pageSources)].sort().join("+"),
+            pins: Object.values(byPage).flat(),
+            byPage: byPage,
+            missingPages: [],
+        };
+    }
+
+    const campaignCollection = _findPinCollection(_get(scope, "Campaign"));
+    const apiCollection = campaignCollection || _apiPinCollection(scope);
+    if (apiCollection) {
+        const grouped = Object.fromEntries(pages.map((page) => [_pageId(page), []]));
+        const unassigned = [];
+        for (const pin of apiCollection.data) {
+            const pageId = _pinPageId(pin);
+            if (Object.prototype.hasOwnProperty.call(grouped, pageId)) grouped[pageId].push(pin);
+            else unassigned.push(pin);
+        }
+        return {
+            available: unassigned.length === 0,
+            source: "campaign." + apiCollection.source,
+            pins: apiCollection.data,
+            byPage: grouped,
+            missingPages: unassigned.map((pin) => _text(pin.id || pin._id)),
+        };
+    }
+
+    return { available: false, source: null, pins: [], byPage: {}, missingPages: missingPages };
+}
+
+function handoutPinReferences(handouts) {
+    const references = [];
+    const errors = [];
+    for (const handout of _array(handouts)) {
+        if (!handout) continue;
+        const raw = handout.pins !== undefined ? handout.pins : handout._pins;
+        if (raw === undefined || raw === null || raw === "") continue;
+        let values;
+        try {
+            values = typeof raw === "string" ? JSON.parse(raw) : raw;
+        } catch (err) {
+            errors.push({ handout_id: _text(handout.id), detail: "pins is not valid JSON" });
+            continue;
+        }
+        if (!Array.isArray(values)) {
+            errors.push({ handout_id: _text(handout.id), detail: "pins is not an array" });
+            continue;
+        }
+        for (const pin of values) {
+            if (!pin || typeof pin !== "object") continue;
+            references.push({
+                handout_id: _text(handout.id),
+                pin_id: _text(pin.id || pin._id),
+                page_id: _text(pin.page || pin.pageId || pin.pageid || pin._pageid),
+                sub_link: _text(pin.subLink),
+                sub_link_type: _text(pin.subLinkType),
+            });
+        }
+    }
+    return { references: references, errors: errors };
+}
+
+function pinReferenceClosure(handouts, byPage) {
+    const parsed = handoutPinReferences(handouts);
+    const handoutIds = new Set(_array(handouts).map((handout) => _text(handout && handout.id)).filter(Boolean));
+    const pins = new Map();
+    const duplicatePinIds = [];
+    const invalidPins = [];
+    const danglingPinLinks = [];
+    for (const [pageId, values] of Object.entries(byPage || {})) {
+        for (const pin of _array(values)) {
+            const pinId = _text(pin && (pin.id || pin._id));
+            if (!pinId || !Number.isFinite(Number(pin.x)) || !Number.isFinite(Number(pin.y))) {
+                invalidPins.push({ pin_id: pinId, page_id: pageId });
+                continue;
+            }
+            if (pins.has(pinId)) duplicatePinIds.push(pinId);
+            else pins.set(pinId, { page_id: pageId, pin: pin });
+            const link = _text(pin.link);
+            const linkType = _text(pin.linkType);
+            if (link && (linkType === "" || linkType === "handout") && !handoutIds.has(link)) {
+                danglingPinLinks.push({ pin_id: pinId, page_id: pageId, handout_id: link });
+            }
+        }
+    }
+
+    const missingReferences = [];
+    const pageMismatches = [];
+    const linkMismatches = [];
+    const subLinkMismatches = [];
+    for (const reference of parsed.references) {
+        const target = pins.get(reference.pin_id);
+        if (!target) {
+            missingReferences.push(reference);
+            continue;
+        }
+        if (reference.page_id && reference.page_id !== target.page_id) {
+            pageMismatches.push({ ...reference, actual_page_id: target.page_id });
+        }
+        const link = _text(target.pin.link);
+        if (link !== reference.handout_id) {
+            linkMismatches.push({ ...reference, actual_handout_id: link });
+        }
+        const subLink = _text(target.pin.subLink);
+        const subLinkType = _text(target.pin.subLinkType);
+        if ((reference.sub_link || reference.sub_link_type)
+            && (subLink !== reference.sub_link || subLinkType !== reference.sub_link_type)) {
+            subLinkMismatches.push({
+                ...reference,
+                actual_sub_link: subLink,
+                actual_sub_link_type: subLinkType,
+            });
+        }
+    }
+    return {
+        pass: parsed.errors.length === 0 && duplicatePinIds.length === 0
+            && invalidPins.length === 0 && danglingPinLinks.length === 0
+            && missingReferences.length === 0 && pageMismatches.length === 0
+            && linkMismatches.length === 0 && subLinkMismatches.length === 0,
+        pinCount: pins.size,
+        referenceCount: parsed.references.length,
+        parseErrors: parsed.errors,
+        duplicatePinIds: duplicatePinIds.sort(),
+        invalidPins: invalidPins,
+        danglingPinLinks: danglingPinLinks,
+        missingReferences: missingReferences,
+        pageMismatches: pageMismatches,
+        linkMismatches: linkMismatches,
+        subLinkMismatches: subLinkMismatches,
+    };
+}
+
 // --- the report -------------------------------------------------------------
 
 class R20ExportReport {
@@ -80,6 +361,8 @@ class R20ExportReport {
         this.characterSheets = [];
         this.characterAttributes = { total: 0, loaded: 0, incomplete: [] };
         this.folderOrphansAppended = {};
+        this.pinSource = null;
+        this.pinClosure = null;
         this.assets = [];
         this.collections = {};
         this.collectionMismatches = [];
@@ -213,6 +496,8 @@ class R20ExportReport {
             character_sheets: this.characterSheets,
             character_attributes: this.characterAttributes,
             folder_orphans_appended: this.folderOrphansAppended,
+            pin_source: this.pinSource,
+            pin_closure: this.pinClosure,
             totals: this.totals,
             collections: this.collections,
             collection_mismatches: this.collectionMismatches,
@@ -244,14 +529,18 @@ function exportedCollectionCounts(campaign) {
     let graphics = 0;
     let paths = 0;
     let texts = 0;
+    let pins = 0;
     for (const page of _array(campaign.pages)) {
         graphics += _array(page.graphics).length;
         paths += _array(page.paths).length;
         texts += _array(page.texts).length;
+        pins += _array(page.pins).length;
     }
     counts.graphics = graphics;
     counts.paths = paths;
     counts.texts = texts;
+    counts.pins = pins;
+    counts.pin_references = handoutPinReferences(campaign.handouts).references.length;
     counts.chat_messages = countChatMessages(campaign.chat_archive);
     return counts;
 }
@@ -286,12 +575,18 @@ function liveCollectionCounts(scope) {
             paths += page.thepaths ? page.thepaths.length : 0;
             texts += page.thetexts ? page.thetexts.length : 0;
         }
+        const pinState = livePinState(scope);
         counts.graphics = graphics;
         counts.paths = paths;
         counts.texts = texts;
+        counts.pins = pinState.available ? pinState.pins.length : null;
     } else {
-        counts.graphics = counts.paths = counts.texts = null;
+        counts.graphics = counts.paths = counts.texts = counts.pins = null;
     }
+    const liveHandouts = _get(scope, "Campaign.handouts.models");
+    counts.pin_references = Array.isArray(liveHandouts)
+        ? handoutPinReferences(liveHandouts.map(_modelData).filter(Boolean)).references.length
+        : null;
     counts.chat_messages = null; // the archive is fetched, never enumerated live
     return counts;
 }
@@ -359,6 +654,19 @@ function checkEngineGlobals(scope) {
         for (const requirement of ENGINE_READINESS) {
             if (!requirement.test(_get(scope, requirement.path))) {
                 loading.push({ path: requirement.path, why: requirement.why });
+            }
+        }
+        let release = null;
+        try {
+            release = _get(scope, "Campaign").toJSON().release;
+        } catch (err) { /* the Campaign requirement reports this separately */ }
+        if (release === "jumpgate") {
+            const pinState = livePinState(scope);
+            if (!pinState.available) {
+                missing.push({
+                    path: "Campaign.pages.models[*].thepins",
+                    why: "Map Pins",
+                });
             }
         }
     }
@@ -430,8 +738,38 @@ function buildIndex(campaign, options = {}) {
         count: entries.length,
         folders: folders.trees,
         scene_barriers: buildSceneBarriers(campaign),
+        scene_pins: buildScenePins(campaign),
         entries: index,
     };
+}
+
+function buildScenePins(campaign) {
+    const pages = {};
+    const totals = {
+        pages: 0, pages_with_pins: 0, pins: 0, hidden: 0, visible: 0,
+        linked: 0, anchors: 0, text_labels: 0, custom_images: 0,
+    };
+    for (const page of _array(campaign.pages)) {
+        if (!page || page.id === undefined || page.id === null) continue;
+        const pins = _array(page.pins);
+        const row = {
+            name: _text(page.name),
+            pins: pins.length,
+            hidden: pins.filter((pin) => _text(pin && pin.visibleTo) !== "all").length,
+            visible: pins.filter((pin) => _text(pin && pin.visibleTo) === "all").length,
+            linked: pins.filter((pin) => _text(pin && pin.link) !== "").length,
+            anchors: pins.filter((pin) => _text(pin && pin.subLink) !== "").length,
+            text_labels: pins.filter((pin) => pin && pin.useTextIcon === true && _text(pin.iconText) !== "").length,
+            custom_images: pins.filter((pin) => _text(pin && pin.customizationType) === "image" && _text(pin.pinImage) !== "").length,
+        };
+        pages[String(page.id)] = row;
+        totals.pages += 1;
+        if (row.pins > 0) totals.pages_with_pins += 1;
+        for (const key of ["pins", "hidden", "visible", "linked", "anchors", "text_labels", "custom_images"]) {
+            totals[key] += row[key];
+        }
+    }
+    return { totals: totals, pages: pages };
 }
 
 // --- scene barriers ---------------------------------------------------------
@@ -631,6 +969,35 @@ function buildIntegrity(campaign, options = {}) {
     const handouts = _idSet(campaign, "handouts");
     const pdfs = _idSet(campaign, "pdfs");
     const tracks = _idSet(campaign, "jukebox");
+    const pinsByPage = Object.fromEntries(_array(campaign.pages).map((page) => [
+        _text(page && page.id), _array(page && page.pins),
+    ]));
+    const pinClosure = pinReferenceClosure(campaign.handouts, pinsByPage);
+
+    for (const error of pinClosure.parseErrors) {
+        findings.push({ kind: "invalid-handout-pin-references", ...error });
+    }
+    for (const id of pinClosure.duplicatePinIds) {
+        findings.push({ kind: "duplicate-pin-id", pin_id: id });
+    }
+    for (const pin of pinClosure.invalidPins) {
+        findings.push({ kind: "invalid-pin", ...pin, detail: "pin has no unique id or finite x/y coordinates" });
+    }
+    for (const pin of pinClosure.danglingPinLinks) {
+        findings.push({ kind: "dangling-pin-link", ...pin, detail: "pin links to a handout absent from the export" });
+    }
+    for (const reference of pinClosure.missingReferences) {
+        findings.push({ kind: "dangling-handout-pin-reference", ...reference, detail: "handout references a pin absent from the export" });
+    }
+    for (const reference of pinClosure.pageMismatches) {
+        findings.push({ kind: "pin-page-mismatch", ...reference, detail: "handout and pin disagree about the owning page" });
+    }
+    for (const reference of pinClosure.linkMismatches) {
+        findings.push({ kind: "pin-handout-mismatch", ...reference, detail: "handout back-reference and pin link disagree" });
+    }
+    for (const reference of pinClosure.subLinkMismatches) {
+        findings.push({ kind: "pin-anchor-mismatch", ...reference, detail: "handout back-reference and pin heading anchor disagree" });
+    }
 
     for (const page of _array(campaign.pages)) {
         for (const graphic of _array(page.graphics)) {
@@ -928,11 +1295,15 @@ return {
     compareCollectionCounts,
     countChatMessages,
     checkEngineGlobals,
+    livePinState,
+    handoutPinReferences,
+    pinReferenceClosure,
     sameCollectionCounts,
     characterAttributeSummary,
     buildIndex,
     buildFolderStructure,
     buildSceneBarriers,
+    buildScenePins,
     buildIntegrity,
     detectCharacterSheet,
     detectCharacterSheets,

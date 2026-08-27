@@ -59,6 +59,10 @@ The one file to read when something looks wrong.
 - `collections` — what the export contains next to what the live campaign held,
   per collection. They should be equal; `collection_mismatches` lists any that
   are not.
+- `pin_source` — the live Roll20 page collection used to capture Map Pins.
+- `pin_closure` — the number of exported Pins and Handout back-references, plus
+  a required `pass: true`. A Jumpgate export is refused when Pins are
+  inaccessible or a Handout reference cannot be resolved.
 - `character_sheet` — the backward-compatible campaign-level sheet summary and
   where it was read from.
 - `character_sheets` — one row per character, including ID, name, all observed
@@ -72,8 +76,8 @@ The one file to read when something looks wrong.
 
 Findings are **flagged and never repaired**: dangling `represents` on tokens
 whose character was deleted, folder entries and journal links pointing at things
-that no longer exist, chat messages with unusable roll payloads, and pages that
-exported empty while still having a thumbnail.
+that no longer exist, inconsistent Map Pin links, chat messages with unusable
+roll payloads, and pages that exported empty while still having a thumbnail.
 
 ### `index.json` — every Roll20 id to `{type, name, folder}`
 
@@ -117,6 +121,11 @@ pages**. `udl_auto_converted` flags a page whose legacy layer Roll20 may already
 deleted during its own migration — for those, an older export can be the only
 surviving copy of the door positions. The exporter records facts and never assigns door
 semantics to a colour.
+
+`scene_pins` records Map Pin totals per page, including hidden/visible Pins,
+Handout links, heading anchors, text labels, and custom images. The complete raw
+Pin records live in each `campaign.json` page's `pins[]` array. Custom Pin and
+tooltip images are bundled under that page's `pins/` directory.
 
 # Automating an export
 

@@ -125,6 +125,12 @@ function buildCampaign() {
                 avatar: IMG + "/rumours/med.png?3",
                 inplayerjournals: "all",
                 controlledby: "",
+                pins: JSON.stringify([{
+                    id: "pin-1",
+                    page: "page-1",
+                    subLink: "1. Entrance",
+                    subLinkType: "headerGM",
+                }]),
                 notes: "escaped",
                 gmnotes: "escaped",
             },
@@ -152,6 +158,31 @@ function buildCampaign() {
             ]),
             thetexts: collection([]),
             thepaths: collection([]),
+            thepins: collection([
+                model({
+                    id: "pin-1",
+                    x: 350,
+                    y: 420,
+                    bgColor: "#242424",
+                    shape: "teardrop",
+                    icon: "base-dot",
+                    pinImage: "/images/pin-marker.png",
+                    customizationType: "icon",
+                    useTextIcon: true,
+                    iconText: "1",
+                    link: "handout-1",
+                    linkType: "handout",
+                    subLink: "1. Entrance",
+                    subLinkType: "headerGM",
+                    title: "1. Entrance",
+                    notes: "",
+                    gmNotes: "The old stairs descend into darkness.",
+                    tooltipImage: IMG + "/pin-tooltip/med.png?9",
+                    visibleTo: "",
+                    tooltipVisibleTo: "",
+                    scale: 1,
+                }),
+            ]),
             doors: collection([]),
             windows: collection([]),
         }
@@ -169,6 +200,7 @@ function buildCampaign() {
             thegraphics: collection([]),
             thetexts: collection([]),
             thepaths: collection([]),
+            thepins: collection([]),
             doors: collection([]),
             windows: collection([]),
         }
@@ -241,6 +273,7 @@ function buildRoutes({ deadAssets = [DEAD_ASSET], legacyOnlyAssets = [LEGACY_ONL
         }
         if (dead.has(direct)) return { status: 404 };
         if (url.startsWith(IMG)) return { body: "image-bytes-for:" + url, type: "image/png" };
+        if (url.startsWith("/images/")) return { body: "image-bytes-for:" + url, type: "image/png" };
         if (url.endsWith(".mp3")) return { body: "audio-bytes", type: "audio/mpeg" };
         return undefined;
     };
