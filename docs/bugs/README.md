@@ -22,3 +22,4 @@ behaviour only exists inside Roll20's page, a recorded fixture in
 | [B009](B009-malformed-http-200-images-reported-bundled.md) | Malformed HTTP 200 images are reported as successfully bundled | Fixed 1.3.2 |
 | [B010](B010-map-pins-omitted.md) | Jumpgate Map Pins are omitted while collection parity reports complete | Fixed 1.4.0 |
 | [B011](B011-map-pins-checked-before-page-initialization.md) | Pin completeness is checked before archived pages initialize `mapPins` | Fixed 1.4.1 |
+| [B012](B012-retained-blobs-unreadable-at-finalization.md) | Retained asset Blobs can become unreadable before ZIP finalization | Provisional |

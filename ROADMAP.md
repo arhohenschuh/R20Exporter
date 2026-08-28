@@ -305,6 +305,15 @@ in a backgrounded tab completes unattended.
 > raised here. This step is a latent-defect fix, not a blocker for any known
 > export, which is also why it is the first thing to defer if 1.0.0 slips.
 
+**Forward request — owner-assisted automated save selection.** Automated runs
+currently use `{ usePicker: false }` because Playwright cannot operate Chromium's
+native `showSaveFilePicker`; that defers the user's download prompt until after
+all processing and ZIP generation. Add a supported owner-assisted mode in which
+automation starts the export, pauses for the owner to choose the destination up
+front, and then continues unattended with the acquired file handle. This keeps
+the direct-to-disk, low-peak-storage path while allowing the owner to go AFK
+during a multi-gigabyte export.
+
 ---
 
 ### R4 · 0.15.0 — Robust character export + MV3 cleanup
