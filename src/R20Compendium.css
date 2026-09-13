@@ -1,0 +1,91 @@
+#r20compendium-toolbar {
+    box-sizing: border-box;
+    margin: 12px 0 18px;
+    padding: 12px 0;
+    border-top: 1px solid #bacbc6;
+    border-bottom: 1px solid #bacbc6;
+    color: #243631;
+    font: inherit;
+    letter-spacing: 0;
+}
+
+#r20compendium-toolbar .r20compendium-row,
+#r20compendium-toolbar .r20compendium-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    min-width: 0;
+}
+
+#r20compendium-toolbar .r20compendium-actions {
+    margin-left: auto;
+}
+
+#r20compendium-toolbar .r20compendium-count {
+    font-size: 13px;
+    color: #53635f;
+}
+
+#r20compendium-toolbar button {
+    box-sizing: border-box;
+    min-height: 36px;
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 1px solid #728d83;
+    border-radius: 4px;
+    background: #fff;
+    color: #243631;
+    font: inherit;
+    font-size: 14px;
+    line-height: 1.4;
+    white-space: normal;
+    cursor: pointer;
+}
+
+#r20compendium-toolbar #r20compendium-export {
+    background: #286549;
+    color: #fff;
+}
+
+#r20compendium-toolbar button:focus-visible {
+    outline: 2px solid #2364a0;
+    outline-offset: 3px;
+}
+
+#r20compendium-toolbar button:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+#r20compendium-toolbar progress {
+    display: block;
+    width: 100%;
+    height: 8px;
+    margin-top: 12px;
+    accent-color: #286549;
+}
+
+#r20compendium-toolbar .r20compendium-status {
+    margin: 8px 0 0;
+    font-size: 13px;
+    min-height: 20px;
+    overflow-wrap: anywhere;
+}
+
+#r20compendium-toolbar[data-state="failed"] .r20compendium-status,
+#r20compendium-toolbar[data-state="partial"] .r20compendium-status {
+    color: #9b311f;
+    font-weight: bold;
+}
+
+#r20compendium-toolbar [hidden] {
+    display: none;
+}
+
+@media (max-width: 520px) {
+    #r20compendium-toolbar .r20compendium-actions {
+        width: 100%;
+        margin-left: 0;
+    }
+}

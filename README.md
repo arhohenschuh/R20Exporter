@@ -138,6 +138,105 @@ window.R20Exporter_instance.exportCampaignZip(null, { usePicker: false })
 
 The archive is then delivered as an ordinary download.
 
+# Optional Compendium Export
+
+Version 1.5.0 adds a separate **Export Compendium** action on supported Roll20
+book index pages. Campaign exports are unchanged: enabling the extension does
+not automatically request or include any compendium content.
+
+Version 1.5.1 fixes book detection when Roll20 encodes a character in the page
+URL but not in its source link, such as the apostrophe in Storm King's Thunder.
+Source links and request URLs are preserved; only identity comparisons normalize
+the encoding, without combining distinct path segments or source expansions.
+
+Version 1.5.2 also follows source-tagged appendix catalogues and native book
+navigation. Exact HTTPS `roll20.net` compendium links are requested through
+`app.roll20.net` using the existing session; their original hrefs stay in the
+archive. The initial count is **index links**, not the total book size. It grows
+to **discovered pages** during export and ends with the captured page count.
+
+1. Sign in to Roll20 in Chrome or Edge with access to the book.
+2. Open that book's web compendium index, such as the Out of the Abyss index.
+3. Click **Export Compendium** in the R20Exporter toolbar and choose a ZIP location.
+
+The toolbar is shown only when the page identifies itself as a book index and
+contains direct entry links. The chosen book's expansion ID is required on every
+captured page. Login pages, access errors, redirects, and responses for another
+expansion are not counted as captured content. Credentials stay in the browser;
+the extension neither asks for nor stores passwords or session cookies.
+
+The export includes the index, its directly linked entries, nested catalogue
+pages, native attribute rows, and referenced images on Roll20's media hosts.
+Nested body links are followed only from pages without attribute rows and only
+when the link explicitly names the selected expansion. Native book navigation
+must also explicitly name that expansion. Ordinary attribute-entry cross-references,
+other books, and unqualified links from nested pages are not crawled. Unlinked
+content, adventure chapters absent from the catalogue, campaign scenes, and
+campaign actors are outside this capture's scope.
+For example, the Out of the Abyss web index lists reference entries rather than
+the adventure chapters. A successful capture does not establish whole-book coverage.
+
+The standalone ZIP contains:
+
+```text
+compendium.json
+export_report.json
+pages/<page-id>-<url-hash>/pagecontent.html
+pages/<page-id>-<url-hash>/pageattrs.html
+pages/<page-id>-<url-hash>/attributes.json
+pages/<page-id>-<url-hash>/illustrations.html
+assets/<sha256>.<extension>
+```
+
+`compendium.json` uses `R20Compendium_format: "1.0"`. It records the selected
+source, request/response URLs, original index links and categories, page IDs,
+ordered attribute files, image references, and SHA-256/size for every content
+member. HTML fragments are **DOM-serialized**, not byte-identical HTTP responses.
+Attribute whitespace, duplicate names, and markup are retained. Original links
+are not rewritten; the manifest maps images to bundled files. Full logged-in page
+chrome and scripts outside the content fragments are never archived. This is a
+source archive, not a sanitized offline website or a Foundry conversion.
+
+The scope is `selected-book-catalogue-and-navigation`. Link records identify
+where and how each target was discovered. `requestAliases` records successfully
+verified URLs that resolve to the same expansion/page ID and identical captured
+content; those aliases do not duplicate pages or assets. The report's `discovery`
+block distinguishes page requests, verified aliases, and excluded links.
+
+This ZIP deliberately has no `campaign.json`. Existing R20Converter campaign
+imports must not be used on it; downstream compendium conversion is a separate
+feature. The extension release itself contains no captured commercial content.
+
+`export_report.json` reports `complete-within-index`, `partial`, `cancelled`, or
+`failed`. Every planned page and discovered image gets a terminal outcome.
+Inaccessible entries, malformed images, unsupported media such as `srcset`,
+inline CSS images or frames, and other media hosts make the result partial.
+Partial ZIPs are saved with a visible warning; cancelled or failed runs are not
+delivered as ZIPs. **Download report** remains available for diagnostics.
+
+A broken source link remains a failure even when native navigation exposes a
+working similarly named page. For example, Shattered Obelisk links to a nonexistent
+generic Credits page, while its native navigation names a working book-specific
+Credits page. The exporter captures the working page but does not silently repair
+the original link or declare it equivalent by name. A partial report must be read
+before downstream use; repeatedly exporting cannot fix a source-side 404.
+
+**Cancel** stops queued requests, active reads, retry waits and ZIP generation.
+Cancelling the compendium's initial save picker starts no capture. The older
+campaign picker's fallback-to-download behavior is unchanged.
+
+Capture uses one request at a time, spaced at least one second apart. Requests
+and image decoding have a 30-second deadline; transient network/server failures
+and HTTP 429 receive at most two retries. `Retry-After` waits up to two minutes
+are honored; longer waits are reported as failures. Limits are 2,000 distinct
+page requests (including aliases, enforced throughout nested discovery),
+8 MiB per HTML response, 32 MiB per image, and 512 MiB of stored content. Limit
+failures are explicit, never silent truncation. Unsupported or changed Roll20
+page layouts may require an exporter update.
+
+Use this only for content you are authorized to access and archive. Access to a
+book does not grant redistribution rights; the licensing warning above applies.
+
 # Demo
 
 Here's a little demo to show you how it works (note that this may not reflect the latest version of the tool) :

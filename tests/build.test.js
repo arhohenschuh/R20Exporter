@@ -29,8 +29,10 @@ test("the build ships exactly what the browser loads, and nothing else", () => {
     const { files, version } = build();
     const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8"));
 
-    for (const file of manifest.content_scripts[0].js) {
-        assert.ok(files.includes(file), file + " is loaded by the browser but not in the build");
+    for (const script of manifest.content_scripts) {
+        for (const file of [...(script.js || []), ...(script.css || [])]) {
+            assert.ok(files.includes(file), file + " is loaded by the browser but not in the build");
+        }
     }
     for (const icon of Object.values(manifest.icons)) {
         assert.ok(files.includes(icon), icon + " is missing from the build");
@@ -52,4 +54,17 @@ test("every vendored library ships with its licence", () => {
         const hasLicence = files.some((f) => f.startsWith(library + "/") && /licen[cs]e/i.test(path.basename(f)));
         assert.ok(hasLicence, library + " ships without a licence file");
     }
+});
+
+test("compendium capture has a separate, isolated entry point", () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8"));
+    const campaign = manifest.content_scripts.find(script => script.matches.some(match => match.includes("/editor/")));
+    const compendium = manifest.content_scripts.find(script => script.matches.some(match => match.includes("/compendium/")));
+    assert.ok(campaign);
+    assert.ok(compendium);
+    assert.equal(campaign.world, "MAIN");
+    assert.equal(compendium.world, "ISOLATED");
+    assert.ok(!campaign.js.some(file => /R20Compendium/.test(file)));
+    assert.ok(!compendium.js.includes("src/R20Exporter.js"));
+    assert.ok(compendium.matches.every(match => match.startsWith("https://app.roll20.net/compendium/")));
 });

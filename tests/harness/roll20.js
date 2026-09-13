@@ -200,7 +200,7 @@ function createPage(options = {}) {
     sandbox.zip.configure({ useWebWorkers: false });
     const configure = sandbox.zip.configure;
     sandbox.zip.configure = (settings) => configure(Object.assign({}, settings, { useWebWorkers: false }));
-    for (const file of ["R20ExportManifests.js", "R20Exporter.js"]) {
+    for (const file of ["R20Archive.js", "R20ExportManifests.js", "R20Exporter.js"]) {
         vm.runInContext(fs.readFileSync(path.join(SRC, file), "utf8"), context, { filename: file });
     }
     vm.runInContext("globalThis.__R20Exporter = R20Exporter;", context, { filename: "expose.js" });

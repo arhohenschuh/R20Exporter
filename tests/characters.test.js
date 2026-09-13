@@ -136,6 +136,7 @@ test("the extension injects itself as a MAIN-world content script", () => {
     assert.deepEqual(script.js, [
         "libs/FileSaver/FileSaver.js",
         "libs/zipjs/zip-fs.js",
+        "src/R20Archive.js",
         "src/R20ExportManifests.js",
         "src/R20Exporter.js",
     ]);

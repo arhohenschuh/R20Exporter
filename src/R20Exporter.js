@@ -200,17 +200,9 @@ class R20Exporter {
     }
 
     _exportZip(zipFs, writable, onprogress) {
-        zip.configure({
-            useWebWorkers: true,
-            // Workers also escape background-tab throttling, which is what made
-            // an unattended export take hours.
-            maxWorkers: (navigator.hardwareConcurrency || 4),
-        })
-        return zipFs.exportWritable(writable, {
-            bufferedWrite: false,
-            keepOrder: true,
+        return R20Archive.exportZip(zipFs, writable,
+            (current, total) => onprogress(current, total || this._total_size), {
             lastModDate: R20_ZIP_EPOCH,
-            onprogress: (current, total) => onprogress(current, total || this._total_size),
         })
     }
 
@@ -242,31 +234,7 @@ class R20Exporter {
     }
 
     async _openZipDestination(filename) {
-        if (this._save_handle) {
-            return {
-                writable: await this._save_handle.createWritable(),
-                deliver: () => undefined,
-            }
-        }
-        // OPFS replaces webkitRequestFileSystem(TEMPORARY, 4 GB), which is
-        // deprecated and whose quota is what produced QuotaExceededError (GH #23).
-        if (navigator.storage && navigator.storage.getDirectory) {
-            const root = await navigator.storage.getDirectory()
-            const handle = await root.getFileHandle("R20Exporter-tmp.zip", { create: true })
-            return {
-                writable: await handle.createWritable(),
-                deliver: async () => {
-                    saveAs(await handle.getFile(), filename)
-                    // Best effort: the browser may still be reading the file.
-                    setTimeout(() => root.removeEntry("R20Exporter-tmp.zip").catch(() => undefined), 60000)
-                },
-            }
-        }
-        const chunks = []
-        return {
-            writable: new WritableStream({ write: (chunk) => { chunks.push(chunk) } }),
-            deliver: () => saveAs(new Blob(chunks, { type: "application/zip" }), filename),
-        }
+        return R20Archive.openDestination(filename, this._save_handle)
     }
 
     async _saveZipToFile(zipFs, filename) {
@@ -1060,40 +1028,7 @@ class R20Exporter {
     }
 
     _validateImageBlob(blob) {
-        if (!blob || blob.size === 0) {
-            return Promise.reject(new Error("image decode failed: the response body is empty"))
-        }
-        if (typeof window.createImageBitmap !== "function") {
-            return Promise.reject(new Error("image decode failed: createImageBitmap is unavailable"))
-        }
-        return Promise.all([
-            blob.slice(0, 2).arrayBuffer(),
-            blob.slice(Math.max(0, blob.size - 65536)).arrayBuffer(),
-        ])
-            .then(([headBuffer, tailBuffer]) => {
-                const head = new Uint8Array(headBuffer)
-                if (head.length < 2 || head[0] !== 0xFF || head[1] !== 0xD8) return
-                const tail = new Uint8Array(tailBuffer)
-                for (let index = tail.length - 2; index >= 0; index--) {
-                    if (tail[index] === 0xFF && tail[index + 1] === 0xD9) return
-                }
-                throw new Error("the JPEG EOI marker is missing")
-            })
-            .then(() => window.createImageBitmap(blob))
-            .then((bitmap) => {
-                try {
-                    if (!bitmap || bitmap.width < 1 || bitmap.height < 1) {
-                        throw new Error("the decoded image has zero dimensions")
-                    }
-                } finally {
-                    if (bitmap && typeof bitmap.close === "function") bitmap.close()
-                }
-            })
-            .catch((error) => {
-                const reason = error && error.message ? error.message : String(error)
-                if (reason.startsWith("image decode failed:")) throw error
-                throw new Error("image decode failed: " + reason)
-            })
+        return R20Archive.validateImageBlob(blob)
     }
 
     _extensionOf(url) {

@@ -109,6 +109,9 @@ keep the trackers distinct.
 | **R10** | 1.3.2 | Decode-validate image bodies before bundling | No | **Delivered** 24 Aug 2026 |
 | **R11** | 1.4.0 | Export Jumpgate Map Pins with closure evidence | No | **Delivered** 27 Aug 2026 |
 | **R12** | 1.4.1 | Await live `mapPins` initialization before Pin gates | No | **Delivered** 27 Aug 2026 |
+| **R13** | 1.5.0 | Optional, source-scoped web compendium export | No | **Local candidate** 13 Sep 2026 |
+| **R14** | 1.5.1 | Recognize encoded compendium book URLs (B013) | No | **Local candidate** 13 Sep 2026 |
+| **R15** | 1.5.2 | Capture same-source nested catalogues and Roll20 host aliases (B014) | No | **Release candidate** 13 Sep 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering
@@ -577,6 +580,19 @@ exact 16-file built runtime into that page and independently returned version
 ---
 
 ## Post-MVP — deliberately after 1.0.0
+
+### R13 - 1.5.0: Optional Compendium Export
+
+See [ADR-006](docs/adr/ADR-006-optional-compendium-export.md) for the accepted
+architecture and [README](README.md#optional-compendium-export) for usage and
+the standalone archive contract. A separate book-index action captures directly
+linked entries, native attributes and available images without changing campaign
+exports. Whole-adventure coverage and downstream converter support are not claimed.
+
+Release gates: source and exact-build regressions; authenticated OotA capture;
+source/asset identity and archive integrity checks; cancellation and negative
+controls; desktop/mobile UI inspection; independent review of the candidate.
+This row describes a local release build, not publication authority.
 
 ### The oracle: per-character derived-value snapshot
 

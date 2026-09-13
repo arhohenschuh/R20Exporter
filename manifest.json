@@ -1,11 +1,12 @@
 {
 	"name": "R20Exporter",
-	"version": "1.4.1",
+	"version": "1.5.2",
 	"manifest_version": 3,
-	"description": "Export a Roll20 Campaign with all its assets to a ZIP file.",
+	"description": "Export a Roll20 campaign or a source-scoped compendium catalogue, including linked appendices, to a ZIP file.",
 	"minimum_chrome_version": "111",
 	"host_permissions": [
-		"*://app.roll20.net/editor/"
+		"*://app.roll20.net/editor/",
+		"https://app.roll20.net/compendium/*"
 	],
 	"icons": {
 		"16": "images/icons/icon16.png",
@@ -24,11 +25,28 @@
 			"js": [
 				"libs/FileSaver/FileSaver.js",
 				"libs/zipjs/zip-fs.js",
+				"src/R20Archive.js",
 				"src/R20ExportManifests.js",
 				"src/R20Exporter.js"
 			],
 			"run_at": "document_idle",
 			"world": "MAIN"
+		},
+		{
+			"matches": [
+				"https://app.roll20.net/compendium/*"
+			],
+			"js": [
+				"libs/FileSaver/FileSaver.js",
+				"libs/zipjs/zip-fs.js",
+				"src/R20Archive.js",
+				"src/R20ExportManifests.js",
+				"src/R20Compendium.js",
+				"src/R20CompendiumPage.js"
+			],
+			"css": ["src/R20Compendium.css"],
+			"run_at": "document_idle",
+			"world": "ISOLATED"
 		}
 	]
 }
