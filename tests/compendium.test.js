@@ -109,7 +109,7 @@ function documentHtml(options = {}) {
         <div id="mainContent"><div class="toccol"><img src="https://files.d20.io/images/portrait.png"></div>
         <div class="content-text" data-expansionid="${options.expansion || "4962"}">
         <h1>${options.title || "Example Book"}</h1>
-        <div class="page-header-source">Source: <a href="/compendium/dnd5e/Example%20Book#content">Example Book</a></div>
+        <div class="page-header-source">Source: <a href="/compendium/dnd5e/${encodeURIComponent(options.book || "Example Book")}#content">${options.book || "Example Book"}</a></div>
         <div id="pagecontent" data-pageid="${options.pageId || "123"}">${options.content || '<h3>Items</h3><a href="/compendium/dnd5e/Example%20Item">Example Item</a>'}</div>
         <div id="pageAttrs">${options.attributes || ""}</div></div></div>
         <script>const credential = "PRIVATE_TOKEN_SENTINEL";</script></body></html>`;
@@ -318,6 +318,109 @@ test("ordinary attribute entries cannot expand the catalogue through their body 
     const result = await harness.collector.collect(INDEX, "4962");
     assert.equal(result.report.pages.captured, 2);
     assert.ok(!harness.requested.some(row => row.url.includes("Unrelated")));
+});
+
+for (const fixture of [
+    { book: "Essentials Kit", expansion: "4415", indexId: "38687", emptyId: "254443", nextId: "254444", featureId: "254362", feature: "Fighting Style - Archery" },
+    { book: "Independent Book", expansion: "50062", indexId: "81001", emptyId: "81002", nextId: "81003", featureId: "81004", feature: "Independent Feature" },
+]) {
+    test(`collector follows native navigation through empty entries in ${fixture.book}`, async () => {
+        const harness = collectorHarness();
+        const address = title => `https://app.roll20.net/compendium/dnd5e/${encodeURIComponent(title)}?expansion=${fixture.expansion}`;
+        const indexUrl = address(fixture.book);
+        const firstEmpty = address("Lists:First Empty");
+        const secondEmpty = address("Lists:Second Empty");
+        const featureUrl = address("Other Options and Features:" + fixture.feature);
+        const hiddenBody = address("Hidden Body");
+        const response = (options, navigation = []) => () => new Response(documentHtml({
+            ...options, book: fixture.book, expansion: fixture.expansion,
+        }).replace("</body>", '<div class="page-links">' + navigation.map(href =>
+            `<a href="${href}">Next or previous</a>`).join("") + "</div></body>"), { headers: { "content-type": "text/html" } });
+        harness.routes[indexUrl] = response({ title: fixture.book, pageId: fixture.indexId,
+            content: `<a href="${firstEmpty}">First empty list</a>` });
+        harness.routes[firstEmpty] = response({ title: "First Empty", pageId: fixture.emptyId,
+            content: `\n<!-- empty list -->\n<a href="${hiddenBody}"></a>` }, [
+            secondEmpty.replace("app.roll20.net", "roll20.net"), indexUrl,
+            "/compendium/dnd5e/Unqualified", "/compendium/dnd5e/Other?expansion=99999",
+            `https://example.org/compendium/dnd5e/Outside?expansion=${fixture.expansion}`,
+            `/compendium/pf2/Other?expansion=${fixture.expansion}`,
+            secondEmpty + "&expansion=" + fixture.expansion,
+        ]);
+        harness.routes[secondEmpty] = response({ title: "Second Empty", pageId: fixture.nextId,
+            content: "\n<!-- empty list -->\n" }, [featureUrl, firstEmpty]);
+        harness.routes[featureUrl] = response({ title: fixture.feature, pageId: fixture.featureId,
+            content: "\n<!-- attribute-only entry -->\n",
+            attributes: '<div class="attrListItem"><span class="attrName">Type</span><span class="attrValue">Class Feature</span></div>',
+        }, [secondEmpty]);
+
+        const result = await harness.collector.collect(indexUrl, fixture.expansion);
+        assert.equal(result.report.status, "partial");
+        assert.deepEqual(result.report.pages, { planned: 4, captured: 2, failed: 2, cancelled: 0 });
+        assert.deepEqual(harness.requested.filter(request => request.credentials === "same-origin").map(request => request.url),
+            [indexUrl, firstEmpty, secondEmpty, featureUrl]);
+        assert.equal(result.report.discovery.pageRequests, 4);
+        assert.deepEqual(result.manifest.pages.filter(page => page.outcome === "captured").map(page => page.pageId),
+            [fixture.indexId, fixture.featureId]);
+        const feature = result.manifest.pages.find(page => page.requestUrl === featureUrl);
+        assert.equal(feature.attributeCount, 1);
+        assert.equal(feature.links[0].relation, "book-navigation");
+        assert.equal(feature.links[0].discoveredOn, secondEmpty);
+        const attributes = JSON.parse(await harness.stored.get(feature.files.find(file => file.path.endsWith("/attributes.json")).path).text());
+        assert.deepEqual(attributes, [{ name: "Type", value: "Class Feature", html: "Class Feature" }]);
+        assert.ok(result.report.failures.every(page => page.reason === "empty-compendium-entry" && !page.files));
+        assert.equal(result.report.failures.length, 2);
+        assert.equal(harness.stored.size, 9);
+    });
+}
+
+test("empty-entry navigation cannot bypass source or structural checks", async () => {
+    const empty = documentHtml({ title: "Empty Entry", content: "\n " });
+    const navigation = '<div class="page-links"><a href="/compendium/dnd5e/Extra?expansion=4962">Next</a></div>';
+    for (const invalid of [
+        { html: empty.replace('data-expansionid="4962"', 'data-expansionid="9999"'), reason: "wrong-source-expansion" },
+        { html: empty.replace('data-pageid="123"', ""), reason: "missing-source-identity" },
+        { html: empty.replace('class="page-header-source"', 'class="missing-header"'), reason: "missing-source-header" },
+        { html: empty.replace('id="pageAttrs"', 'id="pagecontent"'), reason: "missing-or-ambiguous-content" },
+        { html: documentHtml({ content: "\n ", attributes: '<div class="attrListItem">broken</div>' }), reason: "malformed-attribute" },
+        { html: '<form><input type="password"></form>', reason: "missing-or-ambiguous-content" },
+    ]) {
+        const harness = collectorHarness();
+        harness.routes[harness.entryUrl] = () => new Response(invalid.html + navigation, { headers: { "content-type": "text/html" } });
+        const result = await harness.collector.collect(INDEX, "4962");
+        assert.equal(result.report.status, "partial");
+        assert.deepEqual(result.report.pages, { planned: 2, captured: 1, failed: 1, cancelled: 0 });
+        assert.equal(result.manifest.pages[1].reason, invalid.reason);
+        assert.ok(!harness.requested.some(request => request.url.includes("Extra")));
+    }
+});
+
+test("empty-entry navigation obeys discovery limits", async () => {
+    const harness = collectorHarness({ maxPages: 2 });
+    harness.routes[harness.entryUrl] = () => new Response(documentHtml({ title: "Empty Entry", content: "\n " })
+        .replace("</body>", '<div class="page-links"><a href="/compendium/dnd5e/Extra?expansion=4962">Next</a></div></body>'),
+    { headers: { "content-type": "text/html" } });
+    const result = await harness.collector.collect(INDEX, "4962");
+    assert.equal(result.report.status, "failed");
+    assert.deepEqual(result.report.issues, ["page-count-limit"]);
+    assert.equal(result.report.discovery.pageRequests, 2);
+    assert.ok(!harness.requested.some(request => request.url.includes("Extra")));
+});
+
+test("cancellation prevents requests discovered through empty-entry navigation", async () => {
+    const controller = new AbortController();
+    const harness = collectorHarness({ signal: controller.signal,
+        onProgress: progress => { if (progress.phase === "pages" && progress.total === 3) controller.abort(); },
+    });
+    harness.routes[harness.entryUrl] = () => new Response(documentHtml({ title: "Empty Entry", content: "\n " })
+        .replace("</body>", '<div class="page-links"><a href="/compendium/dnd5e/Extra?expansion=4962">Next</a></div></body>'),
+    { headers: { "content-type": "text/html" } });
+    const result = await harness.collector.collect(INDEX, "4962");
+    assert.equal(result.report.status, "cancelled");
+    assert.deepEqual(result.report.pages, { planned: 3, captured: 1, failed: 1, cancelled: 1 });
+    assert.equal(result.report.assets.cancelled, 1);
+    assert.equal(harness.requested.length, 2);
+    assert.ok(!harness.requested.some(request => request.url.includes("Extra")));
+    assert.ok(result.manifest.pages.every(page => page.outcome !== "pending"));
 });
 
 test("discovery limits apply when nested catalogue pages add more work", async () => {

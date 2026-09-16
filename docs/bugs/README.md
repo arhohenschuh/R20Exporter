@@ -25,3 +25,4 @@ behaviour only exists inside Roll20's page, a recorded fixture in
 | [B012](B012-retained-blobs-unreadable-at-finalization.md) | Retained asset Blobs can become unreadable before ZIP finalization | Provisional |
 | [B013](B013-encoded-compendium-book-url-hides-export.md) | Encoded book URLs hide the compendium export toolbar | Fixed in 1.5.1 candidate |
 | [B014](B014-nested-compendium-catalogues-omitted.md) | Official host aliases and nested catalogues omit compendium entries | Fixed in 1.5.2 candidate |
+| [B015](B015-empty-entries-break-compendium-navigation.md) | Empty entries stop traversal to later compendium pages | Fixed in 1.5.3 |

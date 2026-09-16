@@ -155,6 +155,12 @@ navigation. Exact HTTPS `roll20.net` compendium links are requested through
 archive. The initial count is **index links**, not the total book size. It grows
 to **discovered pages** during export and ends with the captured page count.
 
+Version 1.5.3 continues verified same-book next/previous navigation through empty
+entries, so later feature and attribute-only pages are still discovered. Empty
+entries remain uncaptured and reported as `empty-compendium-entry`; they can
+leave an otherwise useful export **partial**. Wrong-source or malformed pages
+never supply navigation, and the existing request limits and cancellation apply.
+
 1. Sign in to Roll20 in Chrome or Edge with access to the book.
 2. Open that book's web compendium index, such as the Out of the Abyss index.
 3. Click **Export Compendium** in the R20Exporter toolbar and choose a ZIP location.
@@ -167,7 +173,7 @@ the extension neither asks for nor stores passwords or session cookies.
 
 The export includes the index, its directly linked entries, nested catalogue
 pages, native attribute rows, and referenced images on Roll20's media hosts.
-Nested body links are followed only from pages without attribute rows and only
+Nested body links are followed only from nonempty pages without attribute rows and only
 when the link explicitly names the selected expansion. Native book navigation
 must also explicitly name that expansion. Ordinary attribute-entry cross-references,
 other books, and unqualified links from nested pages are not crawled. Unlinked

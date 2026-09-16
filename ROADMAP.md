@@ -112,6 +112,7 @@ keep the trackers distinct.
 | **R13** | 1.5.0 | Optional, source-scoped web compendium export | No | **Local candidate** 13 Sep 2026 |
 | **R14** | 1.5.1 | Recognize encoded compendium book URLs (B013) | No | **Local candidate** 13 Sep 2026 |
 | **R15** | 1.5.2 | Capture same-source nested catalogues and Roll20 host aliases (B014) | No | **Release candidate** 13 Sep 2026 |
+| **R16** | 1.5.3 | Continue verified book navigation through empty entries (B015) | No | **Delivered** 16 Sep 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering

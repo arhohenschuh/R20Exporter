@@ -72,7 +72,7 @@ function compendiumError(code) {
     return error;
 }
 
-function readCompendiumDocument(document, responseUrl, expectedExpansion) {
+function readCompendiumDocument(document, responseUrl, expectedExpansion, { allowEmpty = false } = {}) {
     const contents = Array.from(document.querySelectorAll("#pagecontent"))
         .filter(element => !element.parentElement?.closest("#pagecontent"));
     if (contents.length !== 1) {
@@ -113,8 +113,9 @@ function readCompendiumDocument(document, responseUrl, expectedExpansion) {
         if (names.length !== 1 || values.length !== 1) throw compendiumError("malformed-attribute");
         return { name: names[0].textContent, value: values[0].textContent, html: values[0].innerHTML };
     }) : [];
-    if (!content.textContent.trim() && !content.querySelector("img[src]") &&
-        !attributes.some(attribute => attribute.name.trim() && attribute.value.trim())) {
+    const isEmpty = !content.textContent.trim() && !content.querySelector("img[src]") &&
+        !attributes.some(attribute => attribute.name.trim() && attribute.value.trim());
+    if (isEmpty && !allowEmpty) {
         throw compendiumError("empty-compendium-entry");
     }
     const links = [];
@@ -155,7 +156,7 @@ function readCompendiumDocument(document, responseUrl, expectedExpansion) {
         }
     }
     return {
-        title, pageId, expansion, responseUrl, isIndex, links, navigation, media, unsupported,
+        title, pageId, expansion, responseUrl, isIndex, isEmpty, links, navigation, media, unsupported,
         contentHtml: content.innerHTML,
         attributesHtml: attributeContainer ? attributeContainer.innerHTML : "",
         illustrationsHtml: illustrations.map(image => image.outerHTML).join("\n"),
@@ -173,7 +174,7 @@ function compendiumDiscoveryLinks(page) {
             return false;
         }
     };
-    const bodyLinks = page.isIndex ? page.links :
+    const bodyLinks = page.isEmpty ? [] : page.isIndex ? page.links :
         page.attributes.length === 0 ? page.links.filter(explicitlyScoped) : [];
     return [
         ...bodyLinks.map(link => ({ ...link, discoveredOn: page.responseUrl,
@@ -458,7 +459,11 @@ class R20CompendiumCollector {
                 try {
                     const received = await this.request(record.requestUrl, "page");
                     record.attempts = received.attempts;
-                    const page = readCompendiumDocument(this.parseHtml(await received.body.text()), received.responseUrl, expansion);
+                    const page = readCompendiumDocument(this.parseHtml(await received.body.text()), received.responseUrl, expansion, { allowEmpty: true });
+                    if (page.isEmpty) {
+                        discover(page);
+                        throw compendiumError("empty-compendium-entry");
+                    }
                     const contentFingerprint = await fingerprint(page);
                     const previous = capturedIds.get(page.pageId);
                     if (previous) {

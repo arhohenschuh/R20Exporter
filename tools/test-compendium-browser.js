@@ -99,28 +99,30 @@ async function browserAcceptance(options) {
         });
         const imageBytes = Buffer.from(image, "base64");
         const requests = [];
+        let emptyNavigation = false;
         let holdEntry = false;
         let releaseEntry;
         let entryStarted;
         let heldEntry;
-        const html = (entry, catalogue) => `<!doctype html><html><head><title>Compendium Test</title><style>
+        const html = (entry, catalogue, emptyList) => `<!doctype html><html><head><title>Compendium Test</title><style>
             body{margin:24px;font-family:Georgia,serif;color:#243631}#mainContent{max-width:1000px;margin:auto}
             .toccol{display:none}h1{font-size:28px}*{box-sizing:border-box}</style></head><body>
             <nav>PRIVATE_ACCOUNT_SENTINEL</nav><main id="mainContent"><div class="toccol"><img src="https://files.d20.io/images/test.png"></div>
-            <div class="content-text" data-expansionid="4962"><h1>${entry ? "Example Item" : catalogue ? "Bestiary" : "Example King's Book"}</h1>
+            <div class="content-text" data-expansionid="4962"><h1>${entry ? "Example Item" : emptyList ? "Empty List" : catalogue ? "Bestiary" : "Example King's Book"}</h1>
             <div class="page-header-source">Source: <a href="/compendium/dnd5e/Example King's Book">Example King's Book</a></div>
-            <div id="pagecontent" data-pageid="${entry ? "456" : catalogue ? "789" : "123"}">${entry ? '<div id="pagecontent"><p>Original entry text.</p></div>' : catalogue ? '<h3>Items</h3><a href="/compendium/dnd5e/Example%20Item?expansion=4962">Example Item</a>' : '<h3>Appendices</h3><a href="https://roll20.net/compendium/dnd5e/Rules:Bestiary?expansion=4962">Bestiary</a>'}</div>
+            <div id="pagecontent" data-pageid="${entry ? "456" : emptyList ? "790" : catalogue ? "789" : "123"}">${entry ? (emptyNavigation ? '<!-- attribute-only feature -->' : '<div id="pagecontent"><p>Original entry text.</p></div>') : emptyList || (catalogue && emptyNavigation) ? '<!-- empty catalogue -->' : catalogue ? '<h3>Items</h3><a href="/compendium/dnd5e/Example%20Item?expansion=4962">Example Item</a>' : '<h3>Appendices</h3><a href="https://roll20.net/compendium/dnd5e/Rules:Bestiary?expansion=4962">Bestiary</a>'}</div>
             <div id="pageAttrs">${entry ? '<div class="attrListItem"><span class="attrName"> Damage </span><span class="attrValue"> 1d6 </span></div>' : ""}</div>
-            </div>${catalogue ? '<div class="content-text page-links"><a href="https://roll20.net/compendium/dnd5e/Rules:Example%20King%27s%20Book?expansion=4962" title="Example King\'s Book">Previous Page</a></div>' : ""}</main><script>const privateToken="PRIVATE_TOKEN_SENTINEL";</script></body></html>`;
+            </div>${catalogue ? '<div class="content-text page-links"><a href="https://roll20.net/compendium/dnd5e/Rules:Example%20King%27s%20Book?expansion=4962" title="Example King\'s Book">Previous Page</a>' + (emptyNavigation ? '<a href="https://roll20.net/compendium/dnd5e/Lists:Empty?expansion=4962">Next Page</a>' : '') + '</div>' : emptyList ? '<div class="page-links"><a href="/compendium/dnd5e/Example%20Item?expansion=4962">Next Page</a><a href="/compendium/dnd5e/Rules:Bestiary?expansion=4962">Previous Page</a></div>' : ""}</main><script>const privateToken="PRIVATE_TOKEN_SENTINEL";</script></body></html>`;
         await context.route("https://app.roll20.net/compendium/**", async route => {
             requests.push(route.request().url());
             const entry = route.request().url().includes("Example%20Item");
             const catalogue = route.request().url().includes("Rules:Bestiary");
+            const emptyList = route.request().url().includes("Lists:Empty");
             if (entry && holdEntry) {
                 entryStarted();
                 await heldEntry;
             }
-            await route.fulfill({ status: 200, contentType: "text/html", body: html(entry, catalogue) }).catch(error => {
+            await route.fulfill({ status: 200, contentType: "text/html", body: html(entry, catalogue, emptyList) }).catch(error => {
                 if (!holdEntry) throw error;
             });
         });
@@ -194,6 +196,25 @@ async function browserAcceptance(options) {
             assert.ok(colorCount > 8, "toolbar screenshot is blank");
             layouts.push({ viewport, ...layout, screenshot, distinctColors: colorCount });
         }
+        emptyNavigation = true;
+        const emptyDownloadReady = page.waitForEvent("download", { timeout: 30000 });
+        const emptyCapture = await cdp.send("Runtime.evaluate", { contextId: isolated.id,
+            expression: "globalThis.R20Compendium_instance.exportZip({usePicker:false}).then(result => result.report)",
+            awaitPromise: true, returnByValue: true,
+        });
+        assert.ok(!emptyCapture.exceptionDetails, "empty-navigation export threw");
+        assert.equal(emptyCapture.result.value.status, "partial");
+        const emptyArchive = path.join(out, "empty-navigation-compendium.zip");
+        await (await emptyDownloadReady).saveAs(emptyArchive);
+        const emptyVerified = await verifyZip(emptyArchive, extension);
+        assert.deepEqual(emptyVerified.capture.pages, { planned: 4, captured: 2, failed: 2, cancelled: 0 });
+        assert.equal(emptyVerified.capture.assets.bundled, 1);
+        assert.equal(emptyVerified.capture.discovery.pageRequests, 5);
+        assert.equal(emptyVerified.capture.discovery.aliases, 1);
+        assert.equal(emptyVerified.capture.failures.length, 2);
+        assert.ok(emptyVerified.capture.failures.every(page => page.reason === "empty-compendium-entry" && !page.files));
+        assert.equal(await page.locator(".r20compendium-count").textContent(), "2 captured pages");
+        emptyNavigation = false;
         const assetRequestsBeforeCancel = requests.filter(url => url.startsWith("https://files.d20.io/")).length;
         holdEntry = true;
         const started = new Promise(resolve => { entryStarted = resolve; });
@@ -208,7 +229,7 @@ async function browserAcceptance(options) {
         const version = JSON.parse(fs.readFileSync(path.join(extension, "manifest.json"))).version;
         const report = { status: "PASS", version, extension, browser: context.browser()?.version(),
             isolatedWorld: { name: isolated.name, origin: isolated.origin }, mainWorldCollector: "undefined",
-            initialRequests, verified, layouts, cancellation: "PASS", networkRequests: requests };
+            initialRequests, verified, emptyEntryNavigation: emptyVerified, layouts, cancellation: "PASS", networkRequests: requests };
         fs.writeFileSync(path.join(out, "browser-report.json"), JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
         return report;
     } finally {
