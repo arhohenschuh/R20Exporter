@@ -20,7 +20,7 @@
 
 // Kept in step with manifest.json by tests/version.test.js. The page context
 // has no access to chrome.runtime, so the version cannot be read at runtime.
-const R20EXPORTER_VERSION = "1.5.3";
+const R20EXPORTER_VERSION = "1.5.4";
 
 const REPORT_FORMAT = "1.4";
 const INTEGRITY_FORMAT = "1.0";
@@ -368,6 +368,7 @@ class R20ExportReport {
         this.pinSource = null;
         this.pinClosure = null;
         this.assets = [];
+        this.documentReadFailures = [];
         this.collections = {};
         this.collectionMismatches = [];
         this.notes = [];
@@ -383,6 +384,16 @@ class R20ExportReport {
 
     note(message) {
         this.notes.push(String(message));
+    }
+
+    failedDocumentRead(document, field, reason, error = null) {
+        this.documentReadFailures.push({
+            id: _text(document.id),
+            name: _text(document.name),
+            field: _text(field),
+            reason: _text(reason),
+            message: error ? String(error.message || error) : null,
+        });
     }
 
     beginAsset(url, path, kind = "image") {
@@ -505,6 +516,7 @@ class R20ExportReport {
             totals: this.totals,
             collections: this.collections,
             collection_mismatches: this.collectionMismatches,
+            document_read_failures: this.documentReadFailures.slice(),
             notes: this.notes.slice().sort(),
             assets: assets,
         };

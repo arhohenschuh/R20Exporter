@@ -18,6 +18,233 @@ function options(overrides = {}) {
     return Object.assign({ campaign: Campaign, jukebox: Jukebox, routes: buildRoutes(), title: "Curse of Strahd" }, overrides);
 }
 
+for (const identity of ["document-alpha", "unrelated-document-beta"]) {
+    for (const reason of ["timeout", "exception"]) {
+        test(`B016 ${reason} records a failed read without inventing empty content: ${identity}`, () => {
+            const page = createExporter();
+            const timers = new Map();
+            let timerId = 0;
+            page.sandbox.setTimeout = (callback) => {
+                timers.set(++timerId, callback);
+                return timerId;
+            };
+            page.sandbox.clearTimeout = (identifier) => timers.delete(identifier);
+            const data = { id: identity, name: "Example document" };
+            let completions = 0;
+            const source = { id: identity, _getLatestBlob() {
+                if (reason === "exception") throw new Error("synthetic read failure");
+            } };
+            try {
+                const operation = page.exporter.newPendingOperation("document read");
+                page.exporter.getLatestBlob(source, "gmnotes", data, operation, () => completions++);
+                for (const callback of Array.from(timers.values())) callback();
+                assert.equal(Object.hasOwn(data, "gmnotes"), false);
+                assert.equal(completions, 1);
+                assert.equal(page.exporter.numPendingOperations, 0);
+                assert.equal(timers.size, 0);
+                const failures = page.exporter.report.toJSON().document_read_failures;
+                assert.equal(failures.length, 1);
+                assert.equal(failures[0].id, identity);
+                assert.equal(failures[0].name, data.name);
+                assert.equal(failures[0].field, "gmnotes");
+                assert.equal(failures[0].reason, reason);
+            } finally {
+                page.stop();
+            }
+        });
+    }
+}
+
+for (const settlement of ["success", "timeout"]) {
+    test(`B016 callbacks after ${settlement} cannot mutate data or complete twice`, () => {
+        const page = createExporter();
+        const timers = new Map();
+        let timerId = 0;
+        page.sandbox.setTimeout = (callback) => {
+            timers.set(++timerId, callback);
+            return timerId;
+        };
+        page.sandbox.clearTimeout = (identifier) => timers.delete(identifier);
+        let deliver;
+        let completions = 0;
+        const source = { id: "late-document", _getLatestBlob(field, callback) { deliver = callback; } };
+        const data = { name: "Late document" };
+        try {
+            const operation = page.exporter.newPendingOperation("document read");
+            page.exporter.getLatestBlob(source, "notes", data, operation, () => completions++);
+            if (settlement === "success") deliver(escape("original text"));
+            else for (const callback of Array.from(timers.values())) callback();
+            const settled = JSON.stringify(data);
+            deliver(escape("late replacement"));
+            assert.equal(JSON.stringify(data), settled);
+            assert.equal(completions, 1);
+            assert.equal(page.exporter.numPendingOperations, 0);
+            assert.equal(timers.size, 0);
+        } finally {
+            page.stop();
+        }
+    });
+}
+
+for (const format of ["json", "zip"]) {
+    for (const kind of ["character", "handout"]) {
+        for (const reason of ["timeout", "exception"]) {
+            test(`B016 ${format} export refuses a ${kind} ${reason} and ignores its late callback`, async () => {
+                const fixture = options();
+                const source = kind === "character" ? fixture.campaign.characters.models[0] : fixture.campaign.handouts.models[0];
+                const field = kind === "character" ? "bio" : "notes";
+                const original = source._getLatestBlob;
+                let deliver;
+                source._getLatestBlob = (key, callback) => {
+                    if (key !== field) return original(key, callback);
+                    deliver = callback;
+                    if (reason === "exception") throw new Error("synthetic field failure");
+                };
+                const page = createExporter(fixture);
+                const schedule = page.sandbox.setTimeout;
+                page.sandbox.setTimeout = (callback, ms) => schedule(callback, [2000, 10000].includes(ms) ? 5 : ms);
+                const messages = [];
+                page.exporter.console.warn = (...args) => messages.push(args.join(" "));
+                page.exporter.console.error = (...args) => messages.push(args.join(" "));
+                try {
+                    if (format === "zip") await page.exporter.exportCampaignZip();
+                    else page.exporter.exportCampaignJson();
+                    await waitFor(() => page.exporter.console.closeShown || page.recorder.saved.length, { label: "document refusal", timeout: 5000 });
+                    assert.equal(page.recorder.saved.length, 0);
+                    assert.equal(page.exporter.zip, null);
+                    assert.equal(page.exporter.numPendingOperations, 0);
+                    assert.equal(page.exporter.report.documentReadFailures.length, 1);
+                    assert.equal(page.exporter.report.documentReadFailures[0].id, source.id);
+                    assert.equal(page.exporter.report.documentReadFailures[0].field, field);
+                    assert.equal(page.exporter.report.documentReadFailures[0].reason, reason);
+                    assert.ok(messages.some(message => message.includes("Export canceled:")));
+                    assert.equal(messages.some(message => message.includes("Congratulations!")), false);
+                    const settled = JSON.stringify(page.exporter.campaign);
+                    deliver(escape("late replacement"));
+                    assert.equal(JSON.stringify(page.exporter.campaign), settled);
+                    assert.equal(page.recorder.saved.length, 0);
+                } finally {
+                    page.stop();
+                }
+            });
+        }
+    }
+}
+
+for (const outcome of ["success", "timeout"]) {
+    test(`B016 ${outcome} settles once while an unrelated operation remains pending`, () => {
+        const page = createExporter();
+        const timers = new Map();
+        let timerId = 0;
+        page.sandbox.setTimeout = (callback) => {
+            timers.set(++timerId, callback);
+            return timerId;
+        };
+        page.sandbox.clearTimeout = (identifier) => timers.delete(identifier);
+        let deliver;
+        let completions = 0;
+        const data = {};
+        try {
+            const other = page.exporter.newPendingOperation("unrelated work");
+            const operation = page.exporter.newPendingOperation("document read");
+            page.exporter.getLatestBlob({ id: "with-other-work", _getLatestBlob(field, callback) { deliver = callback; } },
+                "notes", data, operation, () => completions++);
+            if (outcome === "success") deliver(escape("kept text"));
+            else for (const callback of Array.from(timers.values())) callback();
+            assert.equal(completions, 0);
+            assert.equal(page.exporter.numPendingOperations, 1);
+            assert.equal(timers.size, 0);
+            const settled = JSON.stringify(data);
+            deliver(escape("ignored replacement"));
+            assert.equal(JSON.stringify(data), settled);
+            assert.equal(page.exporter.numPendingOperations, 1);
+            if (page.exporter.completedOperation(other)) completions++;
+            deliver(escape("also ignored"));
+            assert.equal(completions, 1);
+            assert.equal(JSON.stringify(data), settled);
+        } finally {
+            page.stop();
+        }
+    });
+}
+
+for (const entry of [
+    { field: "notes", blob: escape("Source text"), expected: "Source text" },
+    { field: "gmnotes", blob: "", expected: "" },
+    { field: "defaulttoken", blob: JSON.stringify({ bar1_value: "12", sides: "first%20side|second" }),
+        expected: { bar1_value: "12", sides: ["first side", "second"] } },
+]) {
+    test(`B016 successful ${entry.field} remains unchanged and clears its timeout`, () => {
+        const page = createExporter();
+        const timers = new Set();
+        page.sandbox.setTimeout = (callback) => { timers.add(callback); return callback; };
+        page.sandbox.clearTimeout = (callback) => timers.delete(callback);
+        const data = {};
+        let completions = 0;
+        try {
+            const operation = page.exporter.newPendingOperation("successful read");
+            page.exporter.getLatestBlob({ id: "successful-document", _getLatestBlob(field, callback) { callback(entry.blob); } },
+                entry.field, data, operation, () => completions++);
+            assert.deepEqual(JSON.parse(JSON.stringify(data[entry.field])), entry.expected);
+            assert.equal(completions, 1);
+            assert.equal(timers.size, 0);
+            assert.equal(page.exporter.report.documentReadFailures.length, 0);
+        } finally {
+            page.stop();
+        }
+    });
+}
+
+for (const kind of ["character", "handout"]) {
+    test(`B016 permission-hidden ${kind} fields are not acquisition failures`, () => {
+        const fixture = options({ is_gm: false });
+        const source = kind === "character" ? fixture.campaign.characters.models[0] : fixture.campaign.handouts.models[0];
+        const original = source.toJSON;
+        source.toJSON = () => Object.assign(original(), { inplayerjournals: "", controlledby: "" });
+        let reads = 0;
+        source._getLatestBlob = () => { reads++; throw new Error("must not read private content"); };
+        const page = createExporter(fixture);
+        try {
+            const data = kind === "character" ? page.exporter.parseCharacter(source, () => {}) : page.exporter.parseHandout(source, () => {});
+            assert.equal(data.gmnotes, "");
+            assert.equal(data[kind === "character" ? "bio" : "notes"], "");
+            assert.equal(reads, 0);
+            assert.equal(page.exporter.report.documentReadFailures.length, 0);
+        } finally {
+            page.stop();
+        }
+    });
+}
+
+test("B016 a failed JSON attempt can be retried successfully", async () => {
+    const fixture = options();
+    const source = fixture.campaign.characters.models[0];
+    const original = source._getLatestBlob;
+    source._getLatestBlob = (field, callback) => {
+        if (field === "bio") throw new Error("temporary read failure");
+        original(field, callback);
+    };
+    const page = createExporter(fixture);
+    const schedule = page.sandbox.setTimeout;
+    page.sandbox.setTimeout = (callback, ms) => schedule(callback, [2000, 10000].includes(ms) ? 5 : ms);
+    try {
+        page.exporter.exportCampaignJson();
+        await waitFor(() => page.exporter.console.closeShown, { label: "first attempt refusal", timeout: 5000 });
+        assert.equal(page.recorder.saved.length, 0);
+        assert.equal(page.exporter.report.documentReadFailures.length, 1);
+        source._getLatestBlob = original;
+        page.exporter.exportCampaignJson();
+        await waitFor(() => page.recorder.saved.length === 1, { label: "successful retry", timeout: 5000 });
+        assert.equal(page.exporter.report.documentReadFailures.length, 0);
+        const campaign = JSON.parse(await page.recorder.saved[0].file.text());
+        let expected;
+        original("bio", blob => { expected = unescape(blob); });
+        assert.equal(campaign.characters.find(character => character.id === source.id).bio, expected);
+    } finally {
+        page.stop();
+    }
+});
+
 test("a campaign that has not arrived is reported as loading, not as understood", () => {
     const arriving = {
         Campaign: {

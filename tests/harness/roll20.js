@@ -10,8 +10,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const SRC = path.join(__dirname, "..", "..", "src");
-const LIBS = path.join(__dirname, "..", "..", "libs");
+const ROOT = process.env.R20EXPORTER_TEST_ROOT || path.join(__dirname, "..", "..");
+const SRC = path.join(ROOT, "src");
+const LIBS = path.join(ROOT, "libs");
 
 // --- jQuery, reduced to what the exporter actually calls ---------------------
 

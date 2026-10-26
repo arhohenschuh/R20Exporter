@@ -21,6 +21,11 @@ The ZIP is compressed in background workers, so you can leave the tab in the bac
 
 The dialog that opens will show you the various steps the script is undertaking and you can click the Log button to see a more detailed log of what is happening. That dialog window will also prevent you from messing around with the campaign. It is best to let the script do its thing unhindered and to not open another campaign in another window. Once the export process is complete, that window will close on its own and the ZIP file will be downloaded automatically — **unless something was missing**, in which case the dialog stays open and tells you what.
 
+If a required character or handout field cannot be read, campaign export stops without saving
+JSON or ZIP output. The Export Log identifies the document, field and failure reason. Retry
+after the documents finish loading. Successfully read empty text and fields intentionally
+hidden by permissions are not read failures.
+
 To report any issues, please go to the GitHub [issue tracker](https://github.com/kakaroto/R20Exporter/issues).
 
 # What is in the ZIP
@@ -37,7 +42,8 @@ The one file to read when something looks wrong.
 
 - `totals` — how many assets were referenced, and how they ended:
   `bundled`, `bundled-lower-res`, `canvas-reencoded`, `failed`, `skipped`,
-  `pending`. **If `failed` is 0, nothing is missing.** `not-renderable` counts
+  `pending`. These are asset totals, not a guarantee of complete campaign data;
+  inspect the collection and character checks below too. `not-renderable` counts
   separately — see below.
 - `assets[]` — one entry per referenced asset: where it landed in the zip
   (`path`), the URL the campaign referenced (`url`), the URL that actually
@@ -71,6 +77,10 @@ The one file to read when something looks wrong.
   is authoritative for mixed-sheet campaigns.
 - `character_attributes` — characters whose sheet never finished loading, and so
   exported without attributes.
+- `document_read_failures` — required document-field reads that timed out or threw,
+  with document ID, name, field, reason and error message. These diagnostics are
+  retained in the exporter report and printed in the Export Log. Any such failure
+  blocks campaign output, so successfully generated ZIPs have an empty list.
 
 ### `integrity.json` — what is inconsistent in the campaign itself
 

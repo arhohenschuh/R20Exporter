@@ -294,6 +294,22 @@ class R20Exporter {
                 " but the campaign has " + mismatch.live + ".")
         }
     }
+
+    _refuseFailedDocumentReads() {
+        const failures = this.report.documentReadFailures
+        if (failures.length === 0) return false
+        this.console.error("<strong>Export canceled: " + failures.length +
+            " required document field(s) could not be read.</strong>")
+        this.console.error("No campaign file was generated. Retry the export after the documents finish loading.")
+        for (const failure of failures) {
+            const details = JSON.stringify(failure).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            this.console.log("Document read failed: ", details)
+        }
+        this.console.showClose()
+        $("#r20exporter-log").show()
+        return true
+    }
+
     _parseSides(sides) {
         let result = []
         const side_list = sides.split("|")
@@ -367,28 +383,40 @@ class R20Exporter {
     }
 
     getLatestBlob(model, field, data, op_id, cb) {
-        try {
-            model._getLatestBlob(field, (blob) => this.updateModel(data, field, blob, op_id, cb));
-        } catch (err) {}
-        // Check for timeout when trying to get latest blob
+        let settled = false
+        let timer = null
+        const settle = (reason, blob = null, error = null) => {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
+            if (!this.isPendingOperation(op_id)) return
+            if (reason) {
+                this.report.failedDocumentRead({
+                    id: model.id || data.id,
+                    name: data.name || model.name,
+                }, field, reason, error)
+                if (this.completedOperation(op_id) && cb) cb()
+            } else {
+                this.updateModel(data, field, blob, op_id, cb)
+            }
+        }
         const _checkBlobTimeout = (lastNumOperations) => {
-            if (!this.isPendingOperation(op_id)) return;
+            if (settled || !this.isPendingOperation(op_id)) return;
             if (lastNumOperations !== this.numPendingOperations) {
-                // Reschedule the check
                 lastNumOperations = this.numPendingOperations;
-                setTimeout(() => _checkBlobTimeout(lastNumOperations), 10000);
+                timer = setTimeout(() => _checkBlobTimeout(lastNumOperations), 10000);
                 return;
             }
-            // Num operations didn't change, so timeout one of the ops
-            this.console.log("Timeout waiting for blob from Roll20");
-            if (data[field] === undefined) {
-                data[field] = "";
-            }
-            if (this.completedOperation(op_id) && cb)
-                cb()
+            settle("timeout")
         }
         const lastNumOperations = this.numPendingOperations;
-        setTimeout(() => _checkBlobTimeout(lastNumOperations), 10000);
+        timer = setTimeout(() => _checkBlobTimeout(lastNumOperations), 10000);
+        try {
+            model._getLatestBlob(field, (blob) => settle(null, blob))
+        } catch (error) {
+            if (settled) throw error
+            settle("exception", null, error)
+        }
     }
 
     parseCharacter(character, cb) {
@@ -628,6 +656,7 @@ class R20Exporter {
             this.console.showClose()
             return
         }
+        this.report.documentReadFailures = []
         this.report.pinSource = pinState.source
         this.report.pinClosure = {
             pass: pinClosure.pass,
@@ -819,6 +848,7 @@ class R20Exporter {
         return new Blob([JSON.stringify(obj, undefined, 4)], { "type": 'text/json' })
     }
     saveCampaign(filename = null) {
+        if (this._refuseFailedDocumentReads()) return
         saveAs(this.jsonToBlob(this.campaign), filename || this.title + ".json")
         this.console.warn("Congratulations! The campaign.json file was generated successfully.")
         this.console.setProgress1(this.TOTAL_STEPS, this.TOTAL_STEPS)
@@ -1492,6 +1522,7 @@ class R20Exporter {
             this.console.error("Saving already in progress. Can't be cancelled.")
             return
         }
+        if (this._refuseFailedDocumentReads()) return
         this._zip_filename = filename || (this.title + ".zip")
         this.zip = this._createZipFile()
         this._total_size = 0
