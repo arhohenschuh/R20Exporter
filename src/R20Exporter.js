@@ -7,6 +7,11 @@ const R20_ZIP_EPOCH = new Date(Date.UTC(1980, 0, 1, 0, 0, 0))
 // downloadResource retries while expBackoff < 30, so this value means "once".
 const NO_RETRY_BACKOFF = 30
 
+// B012: members read and persisted at once, and how long one may take before it
+// stays a Blob instead of holding the export open.
+const STAGING_CONCURRENCY = 16
+const STAGING_TIMEOUT_MS = 120000
+
 class R20Exporter {
     constructor(title) {
         this.title = title
@@ -14,6 +19,12 @@ class R20Exporter {
         this.zip = null
         this._pending_operations = new Set()
         this._total_size = 0
+        this._staging = null
+        this._staging_unavailable = null
+        this._staging_fallback = { count: 0, reason: null }
+        this._stage_limit = R20Archive.createLimiter(STAGING_CONCURRENCY)
+        this._zip_state_active = false
+        this._zip_advance_scheduled = false
         this.report = new R20ExportReport()
         this._live_counts = null
         // The save prompt is a native dialog: automation cannot click it, so it
@@ -122,7 +133,12 @@ class R20Exporter {
             }
         }
         this._updateSecondProgress()
-        return !this.hasPendingOperation()
+        const idle = !this.hasPendingOperation()
+        // B017: a continuation that ran while another operation was still open
+        // leaves nobody to advance the zip when that operation ends.
+        if (idle)
+            this._checkZipDone()
+        return idle
     }
 
     isPendingOperation(id) {
@@ -186,17 +202,95 @@ class R20Exporter {
     _addZipFolder(zipFs, filename) {
         return zipFs.addDirectory(filename)
     }
-    _addFileToZip(zipFs, filename, content) {
+
+    // B012: a member is read once on arrival, hashed when it is an asset, and
+    // persisted to the staging store; its ZIP entry reopens the persisted bytes
+    // only when the archive is written. The staging operation holds the zip
+    // state machine open, so the manifests are never written before every hash
+    // is in.
+    _addFileToZip(zipFs, filename, content, record = null, done = null) {
+        let member
         try {
-            zipFs.addBlob(filename, content)
-            if (content.size !== undefined) {
-                this._total_size += content.size
-            } else if (content.length !== undefined) {
-                this._total_size += content.length
-            }
-        } catch(err) {
-            this.console.error(err);
+            member = R20Archive.addMember(zipFs, filename, content, this._zipPath(zipFs, filename))
+            this._total_size += member.size
+        } catch (err) {
+            this.console.error(err)
+            if (done) done()
+            return
         }
+        const staging = this._staging
+        const subtle = record && window.crypto && window.crypto.subtle
+        if (!staging && !subtle) {
+            if (done) done()
+            return
+        }
+        const id = this.newPendingOperation("Staging " + member.path)
+        const stage = () => content.arrayBuffer().then((buffer) => Promise.all([
+            subtle ? subtle.digest("SHA-256", buffer).then((digest) => {
+                record.sha256 = Array.from(new Uint8Array(digest))
+                    .map((b) => b.toString(16).padStart(2, "0")).join("")
+            }, () => undefined) : null,
+            staging ? staging.persist(buffer) : null,
+        ]))
+        this._stage_limit(() => new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => reject(new Error("staging did not finish within " +
+                (STAGING_TIMEOUT_MS / 1000) + " s")), STAGING_TIMEOUT_MS)
+            stage().then(resolve, reject).finally(() => clearTimeout(timeoutId))
+        })).then(([, handle]) => {
+            if (handle) {
+                member.handle = handle
+                member.blob = null
+            }
+        }, (error) => {
+            if (staging) this._stagingFailed(member, error)
+        }).finally(() => {
+            this.completedOperation(id)
+            if (done) done()
+        })
+    }
+
+    // The member keeps its Blob, which is how every member was held before 1.5.5.
+    _stagingFailed(member, error) {
+        const reason = R20Archive.describeError(error)
+        this._staging_fallback.count += 1
+        if (this._staging_fallback.reason !== null) return
+        this._staging_fallback.reason = reason
+        this.console.warn("Could not stage <em>" + this._escapeHtml(member.path) + "</em> in browser storage (" +
+            this._escapeHtml(reason) + "). It is kept in memory until the ZIP file is written.")
+    }
+
+    async _openStaging() {
+        this._staging = null
+        this._staging_unavailable = null
+        this._staging_fallback = { count: 0, reason: null }
+        this._stage_limit = R20Archive.createLimiter(STAGING_CONCURRENCY)
+        try {
+            this._staging = await R20Archive.openStagingStore()
+        } catch (err) {
+            this._staging_unavailable = R20Archive.describeError(err)
+            this.console.warn("Browser storage for staging is unavailable (" + this._escapeHtml(this._staging_unavailable) +
+                "). Downloaded files are kept in memory until the ZIP file is written.")
+        }
+    }
+
+    _closeStaging(staging = this._staging) {
+        if (this._staging === staging)
+            this._staging = null
+        return staging ? staging.dispose() : Promise.resolve()
+    }
+
+    _noteStaging() {
+        if (this._staging_unavailable) {
+            this.report.note("B012: ZIP members were retained as browser Blobs until finalization; staging was unavailable (" +
+                this._staging_unavailable + ")")
+        } else if (this._staging_fallback && this._staging_fallback.count > 0) {
+            this.report.note("B012: " + this._staging_fallback.count + " ZIP member(s) retained as browser Blobs " +
+                "until finalization; staging failed (" + this._staging_fallback.reason + ")")
+        }
+    }
+
+    _escapeHtml(text) {
+        return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     }
 
     _exportZip(zipFs, writable, onprogress) {
@@ -238,14 +332,16 @@ class R20Exporter {
     }
 
     async _saveZipToFile(zipFs, filename) {
+        const staging = this._staging
         this.console.warn("Done downloading resources!")
         this.console.log("Generating ZIP file with ", this._formatSize(this._total_size), " of data")
         this.console.setLabel1("Generating " + this._formatSize(this._total_size) + " ZIP file (" +
             this.TOTAL_STEPS + "/" + this.TOTAL_STEPS + ")")
         this.console.setProgress1(this.TOTAL_STEPS - 1, this.TOTAL_STEPS)
 
+        let destination = null
         try {
-            const destination = await this._openZipDestination(filename)
+            destination = await this._openZipDestination(filename)
             await this._exportZip(zipFs, destination.writable, (current, total) => {
                 this.console.setProgress2(current, total)
                 this.console.setLabel2("Generating ZIP file (" + (100 * current / (total || 1)).toFixed(2) + "%)")
@@ -256,18 +352,21 @@ class R20Exporter {
             this._reportFailuresToUser()
             $("#r20exporter-log").show();
         } catch (err) {
-            const message = (err && err.message) ? err.message : String(err)
-            this.console.error("Error writing the zip file: ", message)
+            const message = R20Archive.describeError(err)
+            this.console.error("Error writing the zip file: ", this._escapeHtml(message))
             if (message.includes("Quota")) {
                 this.console.error("You have run out of disk space for this browser profile. Free some space, or " +
                     "choose a save location when the export starts so the zip is written straight to disk.")
             }
+            if (destination)
+                await Promise.resolve().then(() => destination.abort()).catch(() => undefined)
             this.console.showClose()
             $("#r20exporter-log").show();
         } finally {
             try {
                 zip.terminateWorkers()
             } catch (err) { }
+            await this._closeStaging(staging)
         }
     }
 
@@ -1072,7 +1171,7 @@ class R20Exporter {
         // up in the zip under that name, so renaming it here loses the asset
         // downstream. The real type is reported instead (GH #11).
         const filename = `${prefix}.${this._extensionOf(url)}`
-        this._addFileToZip(folder, filename, blob)
+        this._addFileToZip(folder, filename, blob, record, finallyCB)
         this.report.succeeded(record, {
             path: this._zipPath(folder, filename),
             servedFrom: candidate.url,
@@ -1082,30 +1181,6 @@ class R20Exporter {
             outcome: use_canvas ? OUTCOME.CANVAS
                 : (candidate.variant && candidate.variant !== "original" ? OUTCOME.LOWER_RES : OUTCOME.BUNDLED),
         })
-        this._hashAsset(record, blob, finallyCB)
-    }
-
-    // Hashing holds the zip state machine open, so the manifests are never
-    // written before every hash is in.
-    _hashAsset(record, blob, done) {
-        const subtle = window.crypto && window.crypto.subtle
-        if (!blob || typeof blob.arrayBuffer !== "function" || !subtle) {
-            done()
-            return
-        }
-        const id = this.newPendingOperation("Hashing " + record.path)
-        const finish = () => {
-            this.completedOperation(id)
-            done()
-        }
-        blob.arrayBuffer()
-            .then((buffer) => subtle.digest("SHA-256", buffer))
-            .then((digest) => {
-                record.sha256 = Array.from(new Uint8Array(digest))
-                    .map((b) => b.toString(16).padStart(2, "0")).join("")
-                finish()
-            })
-            .catch(() => finish())
     }
 
     _makeNameUnique(names, orig_name) {
@@ -1142,18 +1217,15 @@ class R20Exporter {
 
     _makeAddBlobToZip(folder, filename, finallyCB, record = null, details = null) {
         return (blob, servedFrom) => {
-            this._addFileToZip(folder, filename, blob)
-            if (!record) {
-                finallyCB();
+            this._addFileToZip(folder, filename, blob, record, finallyCB)
+            if (!record)
                 return
-            }
             this.report.succeeded(record, Object.assign({
                 path: this._zipPath(folder, filename),
                 servedFrom: servedFrom || null,
                 bytes: blob && blob.size !== undefined ? blob.size : null,
                 contentType: blob && blob.type ? blob.type : null,
             }, details || {}))
-            this._hashAsset(record, blob, finallyCB)
         }
     }
 
@@ -1502,6 +1574,7 @@ class R20Exporter {
         this.console.setProgress1(9, this.TOTAL_STEPS)
         const id = this.newPendingOperation("Writing export manifests")
         try {
+            this._noteStaging()
             this.report.characterSheet = detectCharacterSheet(this.campaign, window)
             this.report.characterSheets = detectCharacterSheets(this.campaign)
             this.report.characterAttributes = characterAttributeSummary(this.campaign)
@@ -1527,45 +1600,63 @@ class R20Exporter {
         this.zip = this._createZipFile()
         this._total_size = 0
         this.savingStep = 0
-        this._addFileToZip(this.zip, 'campaign.json', this.jsonToBlob(this.campaign))
-        if (this.campaign.chat_archive)
-            this._addFileToZip(this.zip, 'chat_archive.json', this.jsonToBlob(this.campaign.chat_archive))
-        this._checkZipDone()
+        const id = this.newPendingOperation("Opening the staging store")
+        this._zip_state_active = true
+        this._openStaging().then(() => {
+            this._addFileToZip(this.zip, 'campaign.json', this.jsonToBlob(this.campaign))
+            if (this.campaign.chat_archive)
+                this._addFileToZip(this.zip, 'chat_archive.json', this.jsonToBlob(this.campaign.chat_archive))
+            this.completedOperation(id)
+        }).catch((err) => {
+            this._zip_state_active = false
+            this.zip = null
+            this._closeStaging()
+            this.completedOperation(id)
+            this.console.error("Could not start writing the ZIP file: ", this._escapeHtml(R20Archive.describeError(err)))
+            this.console.showClose()
+        })
     }
 
     _checkZipDone(show_pending = false) {
-        if (!this.hasPendingOperation()) {
-            //this.console.log("No more pending operations. Current step is ", this.savingStep)
-            const checkZipDone = (show_pending) => this._checkZipDone(show_pending)
+        if (this.hasPendingOperation() || this._zip_advance_scheduled || !this._zip_state_active)
+            return
+        // B017: every completed operation and every finallyCB ask to advance, so
+        // only one advance may be in flight, and it re-checks before running.
+        this._zip_advance_scheduled = true
+        setTimeout(() => {
+            this._zip_advance_scheduled = false
+            if (this.hasPendingOperation() || !this._zip_state_active)
+                return
+            this._advanceZip()
+        }, 0)
+        if (show_pending) {
+            this.console.log("Download operations in progress : ", this.numPendingOperations)
+            this.console.setProgress2(0, this.numPendingOperations)
+        }
+    }
 
-            if (this.savingStep == 0) {
-                setTimeout(() => this._saveCampaignZipCharacters(checkZipDone), 0)
-                //this.savingStep = 4
-                //this._checkZipDone(true)
-            } else if (this.savingStep == 1) {
-                setTimeout(() => this._saveCampaignZipJournal(checkZipDone), 0)
-            } else if (this.savingStep == 2) {
-                setTimeout(() => this._saveCampaignZipPages(checkZipDone), 0)
-            } else if (this.savingStep == 3) {
-                setTimeout(() => this._saveCampaignZipPage(checkZipDone), 0)
-            } else if (this.savingStep == 4) {
-                setTimeout(() => this._saveCampaignZipJukebox(checkZipDone), 0)
-            } else if (this.savingStep == 5) {
-                setTimeout(() => this._saveCampaignZipDecks(checkZipDone), 0)
-            } else if (this.savingStep == 6) {
-                setTimeout(() => this._saveCampaignZipTables(checkZipDone), 0)
-            } else if (this.savingStep == 7) {
-                setTimeout(() => this._saveCampaignZipManifests(checkZipDone), 0)
-            } else {
-                setTimeout(() => {
-                    this._saveZipToFile(this.zip, this._zip_filename)
-                    this.zip = null
-                }, 0)
-            }
-            if (show_pending) {
-                this.console.log("Download operations in progress : ", this.numPendingOperations)
-                this.console.setProgress2(0, this.numPendingOperations)
-            }
+    _advanceZip() {
+        const checkZipDone = (show_pending) => this._checkZipDone(show_pending)
+        if (this.savingStep == 0) {
+            this._saveCampaignZipCharacters(checkZipDone)
+        } else if (this.savingStep == 1) {
+            this._saveCampaignZipJournal(checkZipDone)
+        } else if (this.savingStep == 2) {
+            this._saveCampaignZipPages(checkZipDone)
+        } else if (this.savingStep == 3) {
+            this._saveCampaignZipPage(checkZipDone)
+        } else if (this.savingStep == 4) {
+            this._saveCampaignZipJukebox(checkZipDone)
+        } else if (this.savingStep == 5) {
+            this._saveCampaignZipDecks(checkZipDone)
+        } else if (this.savingStep == 6) {
+            this._saveCampaignZipTables(checkZipDone)
+        } else if (this.savingStep == 7) {
+            this._saveCampaignZipManifests(checkZipDone)
+        } else {
+            this._zip_state_active = false
+            this._saveZipToFile(this.zip, this._zip_filename)
+            this.zip = null
         }
     }
 

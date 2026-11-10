@@ -17,6 +17,7 @@ Code that exists because of a decision here carries a short comment naming it.
 | [ADR-005](ADR-005-campaign-readiness.md) | An export starts only when the campaign has demonstrably arrived | Accepted |
 | [ADR-006](ADR-006-optional-compendium-export.md) | Separate source-scoped compendium capture | Accepted |
 | [ADR-007](ADR-007-compendium-catalogue-discovery.md) | Source-scoped nested catalogue and navigation discovery | Accepted |
+| [ADR-008](ADR-008-stage-members-on-arrival.md) | Stage every ZIP member on arrival | Accepted |
 
 The release plan these decisions serve is [ROADMAP.md](../../ROADMAP.md); defects are
 recorded in [../bugs](../bugs).

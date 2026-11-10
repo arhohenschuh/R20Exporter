@@ -10,6 +10,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
+const { createOpfs } = require("./opfs.js");
+
 const ROOT = process.env.R20EXPORTER_TEST_ROOT || path.join(__dirname, "..", "..");
 const SRC = path.join(ROOT, "src");
 const LIBS = path.join(ROOT, "libs");
@@ -83,6 +85,9 @@ function makeFetch(routes, log) {
 function createPage(options = {}) {
     const recorder = { entries: [], closed: false, saved: [], fetched: [] };
     const timers = { timeouts: new Set(), intervals: new Set() };
+    // Chrome and Edge always offer OPFS; a test that wants a browser without it
+    // passes its own navigator.
+    const opfs = options.navigator ? null : createOpfs();
     const sandbox = {
         console: options.verbose ? console : { log() {}, warn() {}, error() {} },
         setTimeout: (fn, ms) => {
@@ -131,7 +136,7 @@ function createPage(options = {}) {
         Response: globalThis.Response,
         queueMicrotask,
         structuredClone,
-        navigator: options.navigator || { hardwareConcurrency: 4 },
+        navigator: options.navigator || opfs.navigator,
         crypto: globalThis.crypto,
         AbortController,
         atob: (s) => Buffer.from(s, "base64").toString("binary"),
@@ -215,7 +220,7 @@ function createPage(options = {}) {
         timers.intervals.clear();
     };
 
-    return { sandbox, context, recorder, stop };
+    return { sandbox, context, recorder, stop, opfs };
 }
 
 function createExporter(options = {}) {

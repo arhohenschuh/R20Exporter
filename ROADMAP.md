@@ -113,6 +113,7 @@ keep the trackers distinct.
 | **R14** | 1.5.1 | Recognize encoded compendium book URLs (B013) | No | **Local candidate** 13 Sep 2026 |
 | **R15** | 1.5.2 | Capture same-source nested catalogues and Roll20 host aliases (B014) | No | **Release candidate** 13 Sep 2026 |
 | **R17** | 1.5.4 | Settle document reads once and refuse incomplete campaign output (B016) | No | **Delivered** 26 Oct 2026 |
+| **R18** | 1.5.5 | Stage every ZIP member on arrival; advance the save state machine on every completion (B012, B017) | No | **Delivered** 10 Nov 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering
@@ -594,6 +595,22 @@ Release gates: source and exact-build regressions; authenticated OotA capture;
 source/asset identity and archive integrity checks; cancellation and negative
 controls; desktop/mobile UI inspection; independent review of the candidate.
 This row describes a local release build, not publication authority.
+
+### R18 - 1.5.5: Stage members on arrival (B012, B017)
+
+See [ADR-008](docs/adr/ADR-008-stage-members-on-arrival.md). Each ZIP member is read
+once on arrival, hashed if it is an asset and persisted to OPFS. The ZIP reopens those
+bytes only while the archive is written, so no member depends on a Blob kept for the
+whole export. While triaging B012, a second cause of its "several zero-pending stalls"
+was found: the last canvas candidate could fail validation while its operation was still
+open. That is B017. The save state machine now advances whenever pending work reaches
+zero, and only once per step.
+
+Gate: a Blob readable at acquisition and unreadable at finalization fails 1.5.4 and
+passes 1.5.5, with every asset's ZIP bytes matching its recorded hash. A 0 × 0 deck
+asset stalls 1.5.4 and completes on 1.5.5. Each save step runs exactly once. The full
+suite passes with OPFS staging on by default. The shipped `R20Archive.js` passes in real
+Edge with zip.js workers. No live Roll20 campaign re-export is claimed.
 
 ### The oracle: per-character derived-value snapshot
 

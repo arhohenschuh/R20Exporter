@@ -19,6 +19,15 @@ Your browser asks where to save the archive **when the export starts**, not when
 
 The ZIP is compressed in background workers, so you can leave the tab in the background or minimize the window and the export will keep running at full speed.
 
+Since 1.5.5, every file is saved to the browser's private storage (OPFS) as soon as it
+arrives, and the ZIP is built from those saved copies. Before then, a long or interrupted
+export could lose everything at the last step. During the export, the browser therefore
+needs free disk space roughly equal to the campaign's size. If you cancelled the save
+dialog, it needs about that amount again for the ZIP itself. The saved copies are deleted
+when the export ends. If private storage is unavailable or full, the export still
+completes. The affected files then stay in memory as before, the dialog warns you and
+`export_report.json` counts them in a `B012:` note.
+
 The dialog that opens will show you the various steps the script is undertaking and you can click the Log button to see a more detailed log of what is happening. That dialog window will also prevent you from messing around with the campaign. It is best to let the script do its thing unhindered and to not open another campaign in another window. Once the export process is complete, that window will close on its own and the ZIP file will be downloaded automatically — **unless something was missing**, in which case the dialog stays open and tells you what.
 
 If a required character or handout field cannot be read, campaign export stops without saving

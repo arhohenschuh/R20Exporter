@@ -55,6 +55,130 @@
         });
     }
 
+    // B012: a Blob kept from arrival until the ZIP is written can become
+    // unreadable, which lost a whole DotMM export at its last step. Members are
+    // persisted here as they arrive, and their ZIP entry reopens the persisted
+    // file only when the archive is written.
+    const STAGING_PREFIX = "R20Exporter-staging-";
+    const STAGING_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+
+    function describeError(error) {
+        if (!error) return String(error);
+        const message = error.message || String(error);
+        return error.name && error.name !== "Error" ? error.name + ": " + message : message;
+    }
+
+    async function removeAbandonedStaging(root, now) {
+        if (typeof root.entries !== "function") return;
+        const abandoned = [];
+        try {
+            for await (const [name, handle] of root.entries()) {
+                if (handle.kind !== "directory" || !name.startsWith(STAGING_PREFIX)) continue;
+                const created = Number(name.slice(STAGING_PREFIX.length).split("-")[0]);
+                // Another tab may be exporting right now; only a directory far older
+                // than any export can be assumed abandoned.
+                if (Number.isFinite(created) && now - created > STAGING_MAX_AGE_MS) abandoned.push(name);
+            }
+        } catch {
+            return;
+        }
+        for (const name of abandoned) await root.removeEntry(name, { recursive: true }).catch(() => undefined);
+    }
+
+    async function openStagingStore() {
+        const storage = typeof navigator !== "undefined" ? navigator.storage : undefined;
+        if (!storage || typeof storage.getDirectory !== "function") {
+            throw new Error("the origin private file system is unavailable");
+        }
+        const root = await storage.getDirectory();
+        const now = Date.now();
+        await removeAbandonedStaging(root, now);
+        const name = STAGING_PREFIX + now + "-" + Math.random().toString(36).slice(2, 10);
+        const directory = await root.getDirectoryHandle(name, { create: true });
+        let next = 0;
+        return {
+            name,
+            async persist(buffer) {
+                const file = String(next++);
+                const handle = await directory.getFileHandle(file, { create: true });
+                let writable = null;
+                try {
+                    writable = await handle.createWritable();
+                    await writable.write(buffer);
+                    await writable.close();
+                } catch (error) {
+                    if (writable) await writable.abort().catch(() => undefined);
+                    await directory.removeEntry(file).catch(() => undefined);
+                    throw error;
+                }
+                return handle;
+            },
+            dispose: () => root.removeEntry(name, { recursive: true }).catch(() => undefined),
+        };
+    }
+
+    function createLimiter(limit) {
+        let active = 0;
+        const queue = [];
+        const next = () => {
+            if (active >= limit || queue.length === 0) return;
+            active += 1;
+            const { task, resolve, reject } = queue.shift();
+            Promise.resolve().then(task).then(resolve, reject).finally(() => {
+                active -= 1;
+                next();
+            });
+        };
+        return (task) => new Promise((resolve, reject) => {
+            queue.push({ task, resolve, reject });
+            next();
+        });
+    }
+
+    let MemberReader = null;
+
+    // zip.js instantiates readers only when the archive is written, so the
+    // persisted file is opened then, not when the member arrived.
+    function memberReaderClass() {
+        if (MemberReader) return MemberReader;
+        MemberReader = class extends zip.Reader {
+            constructor(member) {
+                super();
+                this.member = member;
+                this.size = member.size;
+            }
+
+            async readUint8Array(offset, length) {
+                const member = this.member;
+                try {
+                    if (!this.source) {
+                        const source = member.handle ? await member.handle.getFile() : member.blob;
+                        if (!source || source.size !== member.size) {
+                            throw new Error("expected " + member.size + " bytes, found " + (source ? source.size : "none"));
+                        }
+                        this.source = source;
+                    }
+                    const end = offset + length;
+                    const part = offset || end < this.source.size ? this.source.slice(offset, end) : this.source;
+                    const bytes = new Uint8Array(await part.arrayBuffer());
+                    if (end >= this.source.size) this.source = null;
+                    return bytes;
+                } catch (error) {
+                    const wrapped = new Error("could not read " + member.path + " (" + describeError(error) + ")");
+                    wrapped.cause = error;
+                    throw wrapped;
+                }
+            }
+        };
+        return MemberReader;
+    }
+
+    function addMember(folder, filename, blob, path) {
+        const member = { path: path || filename, size: blob.size, blob, handle: null };
+        folder.addData(filename, { Reader: memberReaderClass(), data: member, uncompressedSize: member.size });
+        return member;
+    }
+
     function validateImageBlob(blob) {
         if (!blob || blob.size === 0) {
             return Promise.reject(new Error("image decode failed: the response body is empty"));
@@ -88,5 +212,8 @@
         });
     }
 
-    return { openDestination, exportZip, validateImageBlob };
+    return {
+        openDestination, exportZip, validateImageBlob,
+        openStagingStore, createLimiter, addMember, describeError,
+    };
 });

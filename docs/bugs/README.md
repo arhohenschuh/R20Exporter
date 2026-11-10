@@ -22,7 +22,8 @@ behaviour only exists inside Roll20's page, a recorded fixture in
 | [B009](B009-malformed-http-200-images-reported-bundled.md) | Malformed HTTP 200 images are reported as successfully bundled | Fixed 1.3.2 |
 | [B010](B010-map-pins-omitted.md) | Jumpgate Map Pins are omitted while collection parity reports complete | Fixed 1.4.0 |
 | [B011](B011-map-pins-checked-before-page-initialization.md) | Pin completeness is checked before archived pages initialize `mapPins` | Fixed 1.4.1 |
-| [B012](B012-retained-blobs-unreadable-at-finalization.md) | Retained asset Blobs can become unreadable before ZIP finalization | Provisional |
+| [B012](B012-retained-blobs-unreadable-at-finalization.md) | Retained asset Blobs can become unreadable before ZIP finalization | Fixed 1.5.5 |
 | [B013](B013-encoded-compendium-book-url-hides-export.md) | Encoded book URLs hide the compendium export toolbar | Fixed in 1.5.1 candidate |
 | [B014](B014-nested-compendium-catalogues-omitted.md) | Official host aliases and nested catalogues omit compendium entries | Fixed in 1.5.2 candidate |
 | [B016](B016-document-blob-failures-and-late-callbacks.md) | Document blob failures erase content without a structured failure; late callbacks complete twice | Fixed in 1.5.4 |
+| [B017](B017-zero-pending-stall-at-step-boundary.md) | The campaign ZIP stalls at a step boundary with nothing pending | Fixed 1.5.5 |
