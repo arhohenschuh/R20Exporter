@@ -255,9 +255,16 @@ and image decoding have a 30-second deadline; transient network/server failures
 and HTTP 429 receive at most two retries. `Retry-After` waits up to two minutes
 are honored; longer waits are reported as failures. Limits are 2,000 distinct
 page requests (including aliases, enforced throughout nested discovery),
-8 MiB per HTML response, 32 MiB per image, and 512 MiB of stored content. Limit
+8 MiB per HTML response, 32 MiB per image, and 4 GiB of stored content. Limit
 failures are explicit, never silent truncation. Unsupported or changed Roll20
 page layouts may require an exporter update.
+
+Since 1.5.6, captured pages and images are saved to the browser's private storage
+(OPFS) as they arrive, as campaign exports do, so large illustrated books such as
+*Monsters of the Multiverse* (about 1 GB) fit. If private storage is unavailable,
+members are kept in memory and the earlier 512 MiB limit applies. `export_report.json`
+records which applied in `member_storage` (`opfs-staging` or `memory`) and
+`archive_limit_bytes`, plus `staging_unavailable` when staging could not start.
 
 Use this only for content you are authorized to access and archive. Access to a
 book does not grant redistribution rights; the licensing warning above applies.

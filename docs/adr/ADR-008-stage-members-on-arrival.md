@@ -70,3 +70,13 @@ The ZIP layout, member names, member order and pinned dates are unchanged. The
 - Compendium capture (ADR-006) still uses `addBlob`. Its archive is capped at
   512 MiB and has not shown B012. Adopting `addMember` there is a contained follow-up
   if it ever does.
+
+## Amendment, 2026-11-11 (1.5.6)
+
+The follow-up became necessary: *Monsters of the Multiverse* needs about 1 GB and
+failed at the 512 MiB cap ([B018](../bugs/B018-compendium-archive-size-limit.md)).
+The compendium toolbar now opens the same staging store and adds every member
+through `addMember`. With staging the stored-content cap is 4 GiB; without it,
+members stay Blobs and the 512 MiB cap remains. A failed staging write is fatal
+for a compendium capture, because the collector has already hashed and recorded
+the member. The report states the storage mode and cap.

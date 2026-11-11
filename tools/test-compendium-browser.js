@@ -171,7 +171,9 @@ async function browserAcceptance(options) {
                 return { left: bounds.left, right: bounds.right, viewportWidth: innerWidth, buttons };
             });
             assert.ok(layout.left >= 0 && layout.right <= viewport.width, "toolbar exceeds viewport");
-            assert.ok(layout.buttons.every(button => button.fits && button.x >= layout.left && button.right <= layout.right), "button clipping");
+            // Fractional layout can place an edge a few millionths of a pixel past its container.
+            assert.ok(layout.buttons.every(button => button.fits && button.x >= layout.left - 0.5 && button.right <= layout.right + 0.5),
+                "button clipping: " + JSON.stringify({ viewport, ...layout }));
             for (let first = 0; first < layout.buttons.length; first++) {
                 for (let second = first + 1; second < layout.buttons.length; second++) {
                     const left = layout.buttons[first], right = layout.buttons[second];

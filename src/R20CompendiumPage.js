@@ -8,6 +8,9 @@
         root.R20Compendium_instance = api.mount(document);
     }
 })(typeof globalThis !== "undefined" ? globalThis : this, function (compendium) {
+    const MEMORY_ARCHIVE_LIMIT = 512 * 1024 * 1024;
+    const STAGED_ARCHIVE_LIMIT = 4 * 1024 * 1024 * 1024;
+
     function mount(document, options = {}) {
         if (document.getElementById("r20compendium-toolbar")) return null;
         let source;
@@ -78,6 +81,7 @@
             status.textContent = "Preparing export";
             toolbar.dataset.state = "running";
             let destination;
+            let staging = null;
             try {
                 let saveHandle = null;
                 if (settings.usePicker !== false && picker) {
@@ -94,7 +98,20 @@
                 if (controller.signal.aborted) throw new DOMException("Cancelled", "AbortError");
                 const root = createZip();
                 const folders = new Map([["", root]]);
-                const store = (path, blob) => {
+                // B018: staged members let a large book exceed the in-memory cap (ADR-008).
+                const storage = { mode: "memory", limit: MEMORY_ARCHIVE_LIMIT, unavailable: null };
+                if (typeof archive.openStagingStore === "function" && typeof archive.addMember === "function") {
+                    try {
+                        staging = await archive.openStagingStore();
+                        storage.mode = "opfs-staging";
+                        storage.limit = STAGED_ARCHIVE_LIMIT;
+                    } catch (error) {
+                        storage.unavailable = (error && error.name ? error.name + ": " : "") + (error && error.message || String(error));
+                    }
+                } else {
+                    storage.unavailable = "staging is not supported by this archive";
+                }
+                const store = async (path, blob) => {
                     const parts = path.split("/");
                     const name = parts.pop();
                     let prefix = "";
@@ -104,9 +121,16 @@
                         if (!folders.has(prefix)) folders.set(prefix, folder.addDirectory(part));
                         folder = folders.get(prefix);
                     }
-                    folder.addBlob(name, blob);
+                    if (!staging) {
+                        folder.addBlob(name, blob);
+                        return;
+                    }
+                    const handle = await staging.persist(await blob.arrayBuffer());
+                    const member = archive.addMember(folder, name, blob, path);
+                    member.handle = handle;
+                    member.blob = null;
                 };
-                const collector = createCollector({ store, signal: controller.signal,
+                const collector = createCollector({ store, signal: controller.signal, maxArchiveBytes: storage.limit,
                     onProgress: update => {
                         progress.max = Math.max(1, update.total);
                         progress.value = update.completed;
@@ -116,14 +140,17 @@
                     },
                 });
                 state.result = await collector.collect(document.location.href, source.expansion);
+                state.result.report.member_storage = storage.mode;
+                state.result.report.archive_limit_bytes = storage.limit;
+                if (storage.unavailable) state.result.report.staging_unavailable = storage.unavailable;
                 if (["cancelled", "failed"].includes(state.result.report.status)) {
                     toolbar.dataset.state = state.result.report.status;
                     status.textContent = state.result.report.status === "cancelled" ? "Cancelled" :
                         "Export failed: " + state.result.report.issues.join(", ");
                     return state.result;
                 }
-                store("compendium.json", new Blob([JSON.stringify(state.result.manifest, null, 2)], { type: "application/json" }));
-                store("export_report.json", new Blob([JSON.stringify(state.result.report, null, 2)], { type: "application/json" }));
+                await store("compendium.json", new Blob([JSON.stringify(state.result.manifest, null, 2)], { type: "application/json" }));
+                await store("export_report.json", new Blob([JSON.stringify(state.result.report, null, 2)], { type: "application/json" }));
                 status.textContent = "Writing ZIP";
                 destination = await archive.openDestination(filename, saveHandle,
                     "R20Compendium-" + globalThis.crypto.randomUUID() + ".zip");
@@ -156,6 +183,8 @@
                 return state.result;
             } finally {
                 try { terminateWorkers(); } catch {}
+                if (staging) await staging.dispose().catch(() => undefined);
+                staging = null;
                 state.running = false;
                 start.disabled = false;
                 cancel.hidden = true;

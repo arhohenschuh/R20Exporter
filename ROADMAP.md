@@ -114,6 +114,7 @@ keep the trackers distinct.
 | **R15** | 1.5.2 | Capture same-source nested catalogues and Roll20 host aliases (B014) | No | **Release candidate** 13 Sep 2026 |
 | **R17** | 1.5.4 | Settle document reads once and refuse incomplete campaign output (B016) | No | **Delivered** 26 Oct 2026 |
 | **R18** | 1.5.5 | Stage every ZIP member on arrival; advance the save state machine on every completion (B012, B017) | No | **Delivered** 10 Nov 2026 |
+| **R19** | 1.5.6 | Stage compendium members; raise the compendium cap to 4 GiB (B018) | No | **Delivered** 11 Nov 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering
@@ -611,6 +612,21 @@ passes 1.5.5, with every asset's ZIP bytes matching its recorded hash. A 0 × 0 
 asset stalls 1.5.4 and completes on 1.5.5. Each save step runs exactly once. The full
 suite passes with OPFS staging on by default. The shipped `R20Archive.js` passes in real
 Edge with zip.js workers. No live Roll20 campaign re-export is claimed.
+
+### R19 - 1.5.6: Large compendium books (B018)
+
+*Monsters of the Multiverse* failed with `archive-size-limit` after 291 of 553 images
+(534.8 MB stored). The compendium toolbar now stages members in OPFS like campaign
+exports (ADR-008 amendment), and the stored-content cap is 4 GiB with staging, 512 MiB
+without.
+
+Gate: three of the four new `B018` regressions fail on 1.5.5 and all pass on 1.5.6. The fourth
+guards that the cap still fails closed. Full suite 149/149, also against the extracted package.
+The installed-extension Edge 157 smoke passes, with both captures reporting
+`member_storage: opfs-staging`. Real Edge staged, zipped and hash-verified 4,000 members totaling
+644.6 MB, above the old cap. The smoke tool's button-containment check gained a 0.5 px tolerance:
+on Edge 157 a button edge landed 0.00005 px past its toolbar, which failed 1.5.5 as well. The
+owner's re-export of the book is the remaining live check.
 
 ### The oracle: per-character derived-value snapshot
 

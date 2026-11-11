@@ -3,8 +3,11 @@
 const { test, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
 const { JSDOM } = require("jsdom");
-const { planCompendiumLinks, readCompendiumDocument, parseCompendiumHtml, compendiumAssetUrl, R20CompendiumCollector } = require("../src/R20Compendium.js");
-const { mount } = require("../src/R20CompendiumPage.js");
+const path = require("node:path");
+// A packaged release or a previous build can be tested by pointing this at its root.
+const SRC = path.join(process.env.R20EXPORTER_TEST_ROOT || path.join(__dirname, ".."), "src");
+const { planCompendiumLinks, readCompendiumDocument, parseCompendiumHtml, compendiumAssetUrl, R20CompendiumCollector } = require(path.join(SRC, "R20Compendium.js"));
+const { mount } = require(path.join(SRC, "R20CompendiumPage.js"));
 
 const INDEX = "https://app.roll20.net/compendium/dnd5e/Example%20Book#content";
 const windows = [];
@@ -629,4 +632,106 @@ test("ZIP write errors remain failures and enable the diagnostic report", async 
     assert.equal(aborted, 1);
     assert.match(harness.window.document.querySelector('[role="status"]').textContent, /Export failed/);
     assert.equal(harness.window.document.querySelectorAll("button")[2].disabled, false);
+});
+
+function stagingArchive(options = {}) {
+    const persisted = new Map();
+    const added = new Map();
+    let next = 0;
+    let disposed = 0;
+    return {
+        persisted, added, disposed: () => disposed,
+        archive: {
+            openDestination: async () => ({ writable: {}, deliver: () => undefined, abort: async () => undefined }),
+            exportZip: async () => { if (options.beforeExport) await options.beforeExport(); },
+            openStagingStore: async () => {
+                if (options.unavailable) throw new DOMException("no OPFS", "SecurityError");
+                return {
+                    name: "R20Exporter-staging-test",
+                    persist: async (buffer) => {
+                        if (options.failPersist) throw new DOMException("quota", "QuotaExceededError");
+                        const handle = { id: next++, bytes: Buffer.from(buffer) };
+                        persisted.set(handle.id, handle);
+                        return handle;
+                    },
+                    dispose: async () => { disposed++; },
+                };
+            },
+            addMember: (folder, filename, blob, path) => {
+                const member = { path, size: blob.size, blob, handle: null };
+                added.set(path, member);
+                folder.addMember(filename, member);
+                return member;
+            },
+        },
+    };
+}
+
+function stagingHarness(options = {}) {
+    const staging = stagingArchive(options);
+    let settings;
+    const harness = uiHarness({
+        archive: staging.archive,
+        createZip: () => {
+            const folder = prefix => ({
+                addDirectory: name => folder(prefix + name + "/"),
+                addBlob: (name) => {
+                    if (!options.unavailable) assert.fail("a staged export must not hold Blobs: " + prefix + name);
+                },
+                addMember: () => undefined,
+            });
+            return folder("");
+        },
+        createCollector: (value) => {
+            settings = value;
+            const collector = collectorHarness({ store: value.store }).collector;
+            Object.assign(collector, value);
+            return collector;
+        },
+    });
+    return { ...harness, staging, settings: () => settings };
+}
+
+test("B018 compendium members are staged on arrival and the cap rises to 4 GiB", async () => {
+    const harness = stagingHarness();
+    const result = await harness.instance.exportZip({ usePicker: false });
+    assert.equal(result.report.status, "complete-within-index");
+    assert.equal(harness.settings().maxArchiveBytes, 4 * 1024 * 1024 * 1024);
+    assert.equal(result.report.member_storage, "opfs-staging");
+    assert.equal(result.report.archive_limit_bytes, 4 * 1024 * 1024 * 1024);
+    assert.ok(harness.staging.added.has("compendium.json") && harness.staging.added.has("export_report.json"));
+    for (const [path, member] of harness.staging.added) {
+        assert.ok(member.handle, path + " must be backed by a staged file");
+        assert.equal(member.blob, null, path + " must not keep its Blob");
+        assert.equal(member.handle.bytes.length, member.size);
+    }
+    const asset = result.manifest.assets[0];
+    const staged = harness.staging.added.get(asset.path).handle.bytes;
+    assert.equal(require("node:crypto").createHash("sha256").update(staged).digest("hex"), asset.sha256);
+    assert.equal(harness.staging.disposed(), 1);
+});
+
+test("B018 without staging the compendium keeps the 512 MiB cap and says why", async () => {
+    const harness = stagingHarness({ unavailable: true });
+    const result = await harness.instance.exportZip({ usePicker: false });
+    assert.equal(result.report.status, "complete-within-index");
+    assert.equal(harness.settings().maxArchiveBytes, 512 * 1024 * 1024);
+    assert.equal(result.report.member_storage, "memory");
+    assert.equal(result.report.archive_limit_bytes, 512 * 1024 * 1024);
+    assert.match(result.report.staging_unavailable, /SecurityError/);
+});
+
+test("B018 a failed staging write fails the capture and delivers nothing", async () => {
+    const harness = stagingHarness({ failPersist: true });
+    const result = await harness.instance.exportZip({ usePicker: false });
+    assert.equal(result.report.status, "failed");
+    assert.deepEqual(result.report.issues, ["archive-write-failed"]);
+    assert.equal(harness.staging.disposed(), 1);
+});
+
+test("B018 the archive cap still fails closed when stored content exceeds it", async () => {
+    const harness = collectorHarness({ maxArchiveBytes: 64 });
+    const result = await harness.collector.collect(INDEX, "4962");
+    assert.equal(result.report.status, "failed");
+    assert.deepEqual(result.report.issues, ["archive-size-limit"]);
 });

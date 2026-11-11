@@ -27,3 +27,4 @@ behaviour only exists inside Roll20's page, a recorded fixture in
 | [B014](B014-nested-compendium-catalogues-omitted.md) | Official host aliases and nested catalogues omit compendium entries | Fixed in 1.5.2 candidate |
 | [B016](B016-document-blob-failures-and-late-callbacks.md) | Document blob failures erase content without a structured failure; late callbacks complete twice | Fixed in 1.5.4 |
 | [B017](B017-zero-pending-stall-at-step-boundary.md) | The campaign ZIP stalls at a step boundary with nothing pending | Fixed 1.5.5 |
+| [B018](B018-compendium-archive-size-limit.md) | Large compendium books fail at the 512 MiB stored-content cap | Fixed 1.5.6 |
