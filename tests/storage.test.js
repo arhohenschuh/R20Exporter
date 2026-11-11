@@ -6,6 +6,9 @@ const assert = require("node:assert/strict");
 const { createExporter, waitFor, readZip } = require("./harness/roll20.js");
 const { buildCampaign, buildRoutes } = require("./fixtures/campaign.js");
 
+// Default download names carry the exporter version (manifest.json).
+const VERSION = JSON.parse(require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "manifest.json"), "utf8")).version;
+
 function options(overrides = {}) {
     const { Campaign, Jukebox } = buildCampaign();
     return Object.assign({ campaign: Campaign, jukebox: Jukebox, routes: buildRoutes(), title: "Sunless Citadel" }, overrides);
@@ -34,7 +37,7 @@ test("the save prompt can be switched off, for automation and for impatience", a
     await page.exporter.exportCampaignZip(null, { usePicker: false });
     await waitFor(() => page.recorder.saved.length > 0, { label: "the download" });
     assert.equal(pickerCalls, 0, "no native dialog may be opened");
-    assert.equal(page.recorder.saved[0].filename, "Sunless Citadel.zip");
+    assert.equal(page.recorder.saved[0].filename, "Sunless Citadel-" + VERSION + ".zip");
     page.stop();
 });
 
@@ -48,7 +51,7 @@ test("a save location chosen up front is streamed to, with no download", async (
             // The picker needs the click's user gesture; by the time a multi-GB
             // zip is ready the gesture is long gone.
             pickedDuringClick = page.exporter.campaign.characters === undefined;
-            assert.equal(opts.suggestedName, "Sunless Citadel.zip");
+            assert.equal(opts.suggestedName, "Sunless Citadel-" + VERSION + ".zip");
             return handle;
         },
     }));

@@ -946,9 +946,15 @@ class R20Exporter {
     jsonToBlob(obj) {
         return new Blob([JSON.stringify(obj, undefined, 4)], { "type": 'text/json' })
     }
+    // The exporter version is part of every default download name, so archives
+    // from different releases never overwrite or get mistaken for each other.
+    _defaultFilename(extension) {
+        return this.title + "-" + R20EXPORTER_VERSION + extension
+    }
+
     saveCampaign(filename = null) {
         if (this._refuseFailedDocumentReads()) return
-        saveAs(this.jsonToBlob(this.campaign), filename || this.title + ".json")
+        saveAs(this.jsonToBlob(this.campaign), filename || this._defaultFilename(".json"))
         this.console.warn("Congratulations! The campaign.json file was generated successfully.")
         this.console.setProgress1(this.TOTAL_STEPS, this.TOTAL_STEPS)
         this.console.showClose()
@@ -1596,7 +1602,7 @@ class R20Exporter {
             return
         }
         if (this._refuseFailedDocumentReads()) return
-        this._zip_filename = filename || (this.title + ".zip")
+        this._zip_filename = filename || this._defaultFilename(".zip")
         this.zip = this._createZipFile()
         this._total_size = 0
         this.savingStep = 0
@@ -1668,7 +1674,7 @@ class R20Exporter {
         if (!this.checkEngine())
             return
         const usePicker = options.usePicker === undefined ? this.usePicker : options.usePicker
-        this._save_handle = usePicker ? await this.acquireSaveHandle(filename || (this.title + ".zip")) : null
+        this._save_handle = usePicker ? await this.acquireSaveHandle(filename || this._defaultFilename(".zip")) : null
         this._awaitStableCampaign(() => this.parseCampaign((campaign) => this.saveCampaignZip(filename)))
     }
 

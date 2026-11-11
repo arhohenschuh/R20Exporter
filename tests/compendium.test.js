@@ -735,3 +735,17 @@ test("B018 the archive cap still fails closed when stored content exceeds it", a
     assert.equal(result.report.status, "failed");
     assert.deepEqual(result.report.issues, ["archive-size-limit"]);
 });
+
+test("compendium downloads carry the exporter version in their names", async () => {
+    let suggested;
+    const saved = [];
+    const harness = uiHarness({
+        version: "9.8.7",
+        picker: async (options) => { suggested = options.suggestedName; return {}; },
+        saveAs: (blob, name) => saved.push(name),
+    });
+    await harness.instance.exportZip();
+    assert.equal(suggested, "Example Book-compendium-9.8.7.zip");
+    harness.window.document.querySelectorAll("button")[2].click();
+    assert.deepEqual(saved, ["Example Book-compendium-9.8.7-report.json"]);
+});

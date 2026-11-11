@@ -17,6 +17,10 @@ To export your campaign go to the settings tab in the Roll20 page (the gear icon
 
 Your browser asks where to save the archive **when the export starts**, not when it finishes: choosing a location up front lets the ZIP be streamed to disk instead of being held in memory. If you cancel that dialog the export still works and the file is downloaded normally at the end.
 
+Since 1.5.7 the suggested file name carries the exporter version: `<campaign title>-1.5.7.zip`
+(and `<campaign title>-1.5.7.json` for the JSON export), so exports from different releases
+never overwrite each other.
+
 The ZIP is compressed in background workers, so you can leave the tab in the background or minimize the window and the export will keep running at full speed.
 
 Since 1.5.5, every file is saved to the browser's private storage (OPFS) as soon as it
@@ -201,7 +205,9 @@ campaign actors are outside this capture's scope.
 For example, the Out of the Abyss web index lists reference entries rather than
 the adventure chapters. A successful capture does not establish whole-book coverage.
 
-The standalone ZIP contains:
+The standalone ZIP is named `<book title>-compendium-<exporter version>.zip`, for example
+`Mordenkainen Presents - Monsters of the Multiverse-compendium-1.5.7.zip`; the diagnostic report
+downloads as `…-compendium-1.5.7-report.json`. It contains:
 
 ```text
 compendium.json

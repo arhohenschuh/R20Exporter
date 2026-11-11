@@ -115,6 +115,7 @@ keep the trackers distinct.
 | **R17** | 1.5.4 | Settle document reads once and refuse incomplete campaign output (B016) | No | **Delivered** 26 Oct 2026 |
 | **R18** | 1.5.5 | Stage every ZIP member on arrival; advance the save state machine on every completion (B012, B017) | No | **Delivered** 10 Nov 2026 |
 | **R19** | 1.5.6 | Stage compendium members; raise the compendium cap to 4 GiB (B018) | No | **Delivered** 11 Nov 2026 |
+| **R20** | 1.5.7 | Exporter version in default campaign and compendium download names | No | **Delivered** 11 Nov 2026 |
 | — | post-1.0 | The oracle · Firefox · architecture | deferred, see Post-MVP | |
 
 **The MVP1 line is drawn after R5 deliberately.** R1–R4 are bounded engineering
@@ -627,6 +628,16 @@ The installed-extension Edge 157 smoke passes, with both captures reporting
 644.6 MB, above the old cap. The smoke tool's button-containment check gained a 0.5 px tolerance:
 on Edge 157 a button edge landed 0.00005 px past its toolbar, which failed 1.5.5 as well. The
 owner's re-export of the book is the remaining live check.
+
+### R20 - 1.5.7: Versioned download names
+
+Owner request: default names carry the exporter version, so exports from different releases
+are distinguishable and never overwrite each other. Campaign: `<title>-<version>.zip` / `.json`;
+compendium: `<title>-compendium-<version>.zip` and `-report.json`. Archive contents, member names
+and formats are unchanged; an explicit filename passed by a caller is still used as given.
+
+Gate: the new naming tests fail on 1.5.6 and pass on 1.5.7; full suite 150/150, also against
+the extracted package; installed-extension Edge compendium smoke passes.
 
 ### The oracle: per-character derived-value snapshot
 

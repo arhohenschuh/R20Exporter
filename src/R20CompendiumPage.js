@@ -64,7 +64,9 @@
         toolbar.append(row, progress, status);
         document.querySelector("#pagecontent").closest("[data-expansionid]")
             .querySelector(".page-header-source").after(toolbar);
-        const filename = source.title.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/[. ]+$/, "").slice(0, 100) + "-compendium.zip";
+        const version = options.version || globalThis.R20EXPORTER_VERSION;
+        const filename = source.title.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/[. ]+$/, "").slice(0, 100) +
+            "-compendium" + (version ? "-" + version : "") + ".zip";
         const state = { running: false, result: null, exportZip, cancel: () => controller?.abort() };
         let controller;
 

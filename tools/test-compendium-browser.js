@@ -150,7 +150,10 @@ async function browserAcceptance(options) {
         assert.ok(!capture.exceptionDetails, "isolated export threw");
         assert.equal(capture.result.value.status, "complete-within-index");
         const archive = path.join(out, "synthetic-compendium.zip");
-        await (await downloadReady).saveAs(archive);
+        const download = await downloadReady;
+        await download.saveAs(archive);
+        const expectedName = "Example King's Book-compendium-" + JSON.parse(fs.readFileSync(path.join(extension, "manifest.json"))).version + ".zip";
+        assert.equal(download.suggestedFilename(), expectedName, "download name must carry the exporter version");
         const verified = await verifyZip(archive, extension);
         assert.equal(verified.capture.pages.captured, 3);
         assert.equal(verified.capture.assets.bundled, 1);
@@ -230,7 +233,7 @@ async function browserAcceptance(options) {
         assert.equal(requests.filter(url => url.startsWith("https://files.d20.io/")).length, assetRequestsBeforeCancel);
         const version = JSON.parse(fs.readFileSync(path.join(extension, "manifest.json"))).version;
         const report = { status: "PASS", version, extension, browser: context.browser()?.version(),
-            isolatedWorld: { name: isolated.name, origin: isolated.origin }, mainWorldCollector: "undefined",
+            isolatedWorld: { name: isolated.name, origin: isolated.origin }, mainWorldCollector: "undefined", downloadName: expectedName,
             initialRequests, verified, emptyEntryNavigation: emptyVerified, layouts, cancellation: "PASS", networkRequests: requests };
         fs.writeFileSync(path.join(out, "browser-report.json"), JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
         return report;
